@@ -80,7 +80,8 @@ perf-mcp-server (Kotlin/JVM)
   ├── Core Layer
   │   ├── MCP Handler        — exposes MCP tools/resources
   │   ├── Orchestrator       — routes test plans to adapters, manages runs
-  │   └── Baseline Store     — persists runs as JSON, supports baseline lifecycle
+  │   └── Baseline Store     — SQLite db: runs, baselines, orchestration state
+  │   └── Run Scheduler      — serializes test execution to prevent overlapping runs
   └── Adapter Layer
       ├── tool adapters      — translates test plans to tool-specific invocation
       └── adapter registry   — discoverable by agents via list_adapters
@@ -89,10 +90,12 @@ perf-mcp-server (Kotlin/JVM)
 ### Data Flow
 
 1. Agent calls `run_test(tool, test_name, test_plan)` via MCP
-2. Core layer validates, persists pending run, dispatches to adapter
-3. Adapter translates test plan to tool-specific invocation (in-process JVM call, shell exec, etc.)
-4. Adapter parses tool output into normalized `RunResult`
-5. Core layer persists result, returns `run_id` to agent
+2. Core layer validates the test plan, persists a pending run record in SQLite
+3. Run is enqueued — scheduler serializes execution to prevent overlapping runs that could add noise
+4. When the run reaches the front of the queue, the scheduler dispatches it to the adapter
+5. Adapter translates test plan to tool-specific invocation (in-process JVM call, shell exec, etc.)
+6. Adapter parses tool output into normalized `RunResult`
+7. Core layer persists result in SQLite, updates run status, returns `run_id` to agent (via polling or callback)
 
 ## Adapter Interface
 
@@ -214,23 +217,91 @@ else:
 - Warmup period excluded from metrics (configurable per adapter)
 - `compare_with_baseline` returns statistical confidence flags when distribution comparison is available (Phase 7+)
 
-## Baseline Store
+## SQLite Database
 
-Persistence under `~/.boehm/runs/`:
+A single SQLite database at `~/.boehm/boehm.db` stores all persistent state:
+
+### Schema
+
+```sql
+-- Tools and adapters
+CREATE TABLE adapters (
+    name TEXT PRIMARY KEY,
+    supported_types TEXT NOT NULL,       -- JSON array
+    version TEXT NOT NULL
+);
+
+-- Test plans / scenarios
+CREATE TABLE test_scenarios (
+    id TEXT PRIMARY KEY,
+    tool TEXT NOT NULL REFERENCES adapters(name),
+    name TEXT NOT NULL,
+    test_plan JSON NOT NULL,             -- full test plan params
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(tool, name)
+);
+
+-- Run orchestration
+CREATE TABLE runs (
+    id TEXT PRIMARY KEY,
+    scenario_id TEXT NOT NULL REFERENCES test_scenarios(id),
+    tool TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending | queued | running | completed | failed | cancelled
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    completed_at TEXT,
+    error TEXT,
+    summary JSON,                        -- RunResult.summary
+    raw_output_path TEXT,
+    metadata JSON DEFAULT '{}'
+);
+
+-- Baseline pointers
+CREATE TABLE baselines (
+    scenario_id TEXT NOT NULL REFERENCES test_scenarios(id),
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    tagged_at TEXT NOT NULL DEFAULT (datetime('now')),
+    note TEXT,
+    PRIMARY KEY (scenario_id)            -- one active baseline per scenario
+);
+
+-- Historical baselines (for audit)
+CREATE TABLE baseline_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scenario_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    tagged_at TEXT NOT NULL,
+    superseded_at TEXT,                  -- when replaced or retired
+    note TEXT
+);
+```
+
+**Why SQLite?**
+- Single file, zero infrastructure — same deploy simplicity as JSON
+- Atomic writes, concurrent readers, proper querying (filter runs by status, date, tool, etc.)
+- Joins enable rich queries: "show me all regressions this week" or "which scenario has the noisiest p99?"
+- Schema enforces data integrity (foreign keys, unique constraints) that JSON files lack
+- Runs are persisted in `pending` or `queued` state before execution — enables crash recovery and run history
+- Adequate for teams running thousands to tens of thousands of tests (SQLite handles millions of rows)
+
+### Run Scheduler & Isolation
+
+Overlapping test runs add noise to measurements (background load, resource contention, JVM warmup interference). The scheduler prevents this:
 
 ```
-~/.boehm/runs/
-├── {test_name}/
-│   ├── {timestamp}-{run_id}.json
-│   └── BASELINE -> {timestamp}-{run_id}.json
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  Agent calls │     │  Run Queue   │     │  Scheduler   │
+│  run_test()  │ ──▶ │  (SQLite)    │ ──▶ │  (serial)    │ ──▶ Adapter
+└──────────────┘     └──────────────┘     └──────────────┘
 ```
 
-**Why JSON files?**
-- Zero infrastructure — works immediately in CI, local dev, any environment
-- Simple to inspect, debug, and back up
-- Adequate for single-team usage (thousands of runs, not millions)
-- **Limitation:** JSON store does not support concurrent writers, complex queries, or TB-scale data
-- **Evolution path:** If multi-team or high-volume usage emerges, the store can be swapped for SQLite (same file-based simplicity, better querying) or PostgreSQL. The baseline store interface should be abstracted from day one
+**Rules:**
+- Only one run executes at a time globally (single consumer from the queue)
+- Additional runs are enqueued with status `queued` and start when the active run completes
+- Agents can poll `get_run` to check status (`queued` → `running` → `completed`)
+- If the MCP server restarts while a run is `running`, it's marked `failed` on startup (crash recovery)
+- Future: optional concurrent execution for independent scenarios targeting different hosts (opt-in with an `isolation_group` tag)
+- `validate_pr` runs base then head sequentially in the same queue — no special bypass
 
 ## Non-Functional Requirements
 
@@ -240,7 +311,7 @@ Persistence under `~/.boehm/runs/`:
 | **Reproducibility** | Same `TestPlan` + same tool version + same target = same `RunResult` within statistical noise. The adapter must document known sources of variance |
 | **Performance** | MCP server overhead should be < 50ms per request (excluding test execution time). Adapter operations are async — the agent polls `get_run` for completion |
 | **Security** | Shell exec adapters MUST NOT allow arbitrary command injection. Test plans define parameters, not shell commands. Raw output may contain sensitive data; agents control access |
-| **Concurrency** | JSON store uses file-level locking. Multiple runs against the same test name are serialized. Independent test names can run in parallel |
+| **Run isolation** | Scheduler serializes all runs globally. No overlapping test execution. Future opt-in for independent scenarios targeting different hosts |
 
 ## Versioning & Compatibility
 
@@ -302,7 +373,7 @@ Compare results from different tools running the same test scenario to validate 
 
 | Risk | Mitigation |
 |---|---|
-| **JSON store doesn't scale** | Abstract the store interface from day one. If needed, swap for SQLite or PostgreSQL without changing the rest of the server |
+| **Serial execution is a bottleneck** | Serialization is intentional (measurement integrity). For independent scenarios targeting different hosts, add opt-in `isolation_group` for concurrent execution |
 | **Shell exec adapters are brittle** | Each adapter captures and parses stderr. Adapter validation runs before execution. Version pinning per adapter |
 | **Performance bisect is expensive** | `validate_pr` bisects only on request (opt-in flag). Bisect uses binary search — log(N) runs for N commits |
 | **Noisy load test results** | Warmup period, statistical confidence flags, configurable N-runs median. The agent is trained (via skills) to interpret noise, not just raw numbers |
@@ -353,6 +424,7 @@ Compare results from different tools running the same test scenario to validate 
 
 - HTML report rendering — use Markdown + Mermaid
 - GUI or dashboard — out of scope for Phases 1-3; may be reconsidered later
-- Cloud-hosted baseline store — local-first always, but remote store may be added
+- Cloud-hosted database — local-first always; remote SQLite or PostgreSQL may be added later
 - Fully unsupervised PR blocking — human-in-the-loop for threshold changes and baseline management
 - Support for non-CLI tools (e.g., cloud-hosted load generators) — future consideration
+- Concurrent test execution — serialized by design; opt-in parallelism is future work

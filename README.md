@@ -6,7 +6,8 @@ Named after [Barry Boehm](https://en.wikipedia.org/wiki/Barry_Boehm), known for 
 
 Boehm is not just a test runner. It's an engineer with:
 
-- **Institutional memory** — every run preserved, any run taggable as a baseline
+- **Institutional memory** — every run preserved in SQLite, any run taggable as a baseline
+- **Clean measurements** — run scheduler serializes execution to prevent overlapping test noise
 - **Investigation skills** — detects regressions, bisects commits, traces problems to their source
 - **Tool fluency** — speaks Tulip, k6, JMeter, Gatling, and more through a unified MCP interface
 
@@ -21,6 +22,7 @@ Boehm is not just a test runner. It's an engineer with:
 
 - **Runs tests** against any supported tool through a single MCP interface
 - **Tracks baselines** — mark a run as baseline, compare any future run against it
+- **Serializes execution** — one test at a time, no overlapping noise in measurements
 - **Investigates PRs** — checks out base vs head, runs tests, compares, bisects commits
 - **Analyzes deeply** — distribution comparison, trend detection, anomaly flagging (Phases 6-7)
 - **Reports via skills** — reusable agent workflows produce Markdown + Mermaid reports
