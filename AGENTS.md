@@ -1,12 +1,12 @@
 # Agent Guide — Boehm
 
-MCP server + agents + skills for performance testing automation across multiple tools (Tulip, k6, JMeter, Gatling, etc.). Named after Barry Boehm.
+**Performance Testing AI Engineer.** MCP server + agents + skills with history tracking, baseline comparison, statistical analysis, and git PR investigation. Named after Barry Boehm.
 
 ## Key Documents
 
 | Document | Purpose |
 |----------|---------|
-| `docs/superpowers/specs/YYYY-MM-DD-boehm-design.md` | Architecture, MCP tools, adapter interface, result schema |
+| `docs/superpowers/specs/2026-07-20-boehm-design.md` | Architecture, MCP tools, adapter interface, result schema, future vision |
 
 Read the design spec before changing behaviour.
 
@@ -23,21 +23,32 @@ Read the design spec before changing behaviour.
 ## Architecture
 
 ```
-AI Agent  →  MCP protocol  →  perf-mcp-server (Kotlin)
-                                ├── Core Layer (orchestrator, baseline store, MCP handler)
-                                └── Adapter Layer
-                                    ├── Tulip adapter (in-process JVM)
-                                    ├── k6 adapter (shell exec)
-                                    └── ...
+┌──────────────────────────────────────────────────────────┐
+│  Performance Testing AI Engineer                         │
+│                                                          │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐ │
+│  │  Agent       │  │  Skills      │  │  MCP Server     │ │
+│  │  (Claude     │  │  (method-    │  │  (instruments)  │ │
+│  │   Code, etc) │  │   ology)     │  │                 │ │
+│  └──────┬───────┘  └──────────────┘  └────────┬────────┘ │
+│         │                                      │          │
+│  ┌──────▼──────────────────────────────────────▼────────┐ │
+│  │  Baseline Store (lab notebook)                       │ │
+│  │  → every run preserved, baselines tagged             │ │
+│  │  → git integration for PR investigation              │ │
+│  │  → statistical analysis engine                       │ │
+│  └─────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ### Rules
 
 1. **Adapter contract** — every tool adapter implements `PerfToolAdapter` interface producing normalized `RunResult`.
-2. **Skill-driven reporting** — all report generation lives in opencode skill files (Markdown + Mermaid), not in the MCP server.
-3. **Baseline tagging** — any run can be marked as a baseline; comparison always against the tagged baseline.
-4. **Local-first** — no cloud dependencies, no database; JSON file persistence.
-5. **Extensibility first** — Tulip adapter first, but adapter interface designed for any CLI tool.
+2. **Skill-driven methodology** — engineering knowledge lives in opencode skill files, not in the MCP server.
+3. **Everything preserved** — every run stored; any run can be tagged as a baseline.
+4. **Investigation-first** — git integration identifies which commit and code change caused a regression.
+5. **Local-first** — no cloud dependencies, no database; JSON file persistence.
+6. **Extensibility first** — Tulip adapter first, but adapter interface designed for any CLI tool.
 
 ## Build and Run
 
@@ -48,7 +59,7 @@ AI Agent  →  MCP protocol  →  perf-mcp-server (Kotlin)
 
 ## Design Status
 
-Design in progress — see brainstorming session with project owner. Do not implement until design doc is finalized and approved.
+Design finalized. See implementation plans for current phase.
 
 ## What Not To Do
 

@@ -4,7 +4,15 @@ Named after [Barry Boehm](https://en.wikipedia.org/wiki/Barry_Boehm), known for 
 
 ## Goal
 
-A Model Context Protocol (MCP) server that provides a unified control plane for performance testing tools (Tulip, k6, JMeter, Gatling, etc.), driven by AI coding agents. Includes agent orchestration patterns and opencode skills for perf testing methodology.
+A **Performance Testing AI Engineer** — an AI (agent) specialized in performance testing, equipped with:
+
+- **MCP server** (instruments) — unified interface to run tests across Tulip, k6, JMeter, Gatling, etc.
+- **Skills** (engineering methodology) — opencode skill files that encode how to design experiments, interpret results, and investigate regressions
+- **Baseline store** (lab notebook) — every run preserved, any run taggable as baseline
+- **Statistical analysis** (deep investigation) — distribution comparison, trend detection, anomaly flagging
+- **Git integration** (source investigation) — PR perf checks, commit-level bisect to identify what change caused a regression
+
+Together, these components form an autonomous performance engineer that can design experiments, execute them, analyze results, and track regressions back to the code change that caused them.
 
 ## Architecture
 
