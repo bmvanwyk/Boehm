@@ -120,9 +120,10 @@ perf-mcp-server (Kotlin/JVM)
 3. Run is enqueued — status `pending` → `queued`
 4. Scheduler picks up the run when executor is free — status `queued` → `running`
 5. Adapter translates test plan to tool-specific invocation (in-process JVM call, shell exec, etc.)
-6. Adapter parses tool output into normalized `RunResult`
-7. Core layer persists result in SQLite — status `running` → `completed` (or `failed`)
-8. Agent polls `get_run(run_id)` or uses notification to get the result
+6. **During execution**, the adapter emits periodic progress events (rolling metrics, stage transitions) back to the core layer, which stores them and makes them available via `get_run_progress`
+7. Adapter parses tool output into normalized `RunResult`
+8. Core layer persists final result in SQLite — status `running` → `completed` (or `failed`)
+9. Agent polls `get_run_progress(run_id)` during execution for live updates, then `get_run(run_id)` for the final result
 
 ## Concrete API Examples
 
@@ -463,16 +464,116 @@ jobs:
 ### Core tools
 
 | Tool | Input | Output | Phase |
-|---|---|---|---|
+|---|---|---|---|---|
 | `list_adapters` | — | Tool names + supported test types | 1 |
 | `run_test` | `tool`, `test_name`, `test_plan` | `run_id`, initial status | 1 |
 | `get_run` | `run_id` | Full `RunResult` | 1 |
+| `server_status` | — | Queue depth, current run, scheduler state, uptime | 1 |
+| `get_run_progress` | `run_id` | Live RunResult with partial metrics (% complete, current stage) | 1 |
 | `mark_baseline` | `tool`, `test_name`, `run_id`, `note?`, `env?` | Confirmation | 2 |
 | `get_baseline` | `tool`, `test_name`, `env?` | Baseline `RunResult` or null | 2 |
 | `list_baselines` | `tool?`, `test_name?`, `env?` | List of baselines with env tags | 2 |
 | `compare_with_baseline` | `tool`, `test_name`, `run_id`, `thresholds?`, `env?` | Diff report + verdict | 2 |
 | `list_runs` | `tool?`, `test_name?`, `limit?`, `status?` | Recent runs metadata | 2 |
 | `validate_pr` | `repo`, `pr_number`, `test_suite`, `thresholds?`, `bisect?` | PR comparison report + commit attribution | 6 |
+
+### Server status & live reporting
+
+**server_status** — returns the current scheduler state. Agents call this to check if the server is busy before submitting a test, or to report status to the user:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "name": "server_status",
+    "arguments": {}
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "status": "running",
+    "uptime_sec": 84321,
+    "queue_depth": 2,
+    "currently_running": {
+      "run_id": "a1b2c3d4-...",
+      "tool": "k6",
+      "test_name": "http-api-load",
+      "progress_pct": 67,
+      "current_stage": "running",
+      "elapsed_sec": 20,
+      "estimated_remaining_sec": 10
+    },
+    "queued_runs": [
+      { "run_id": "e5f6...", "tool": "k6", "test_name": "db-query-stress", "position": 1 },
+      { "run_id": "a7b8...", "tool": "tulip", "test_name": "http-api-load", "position": 2 }
+    ],
+    "server_version": "0.1.0",
+    "adapters": ["k6", "tulip"]
+  }
+}
+```
+
+**get_run_progress** — during an active run, returns partial/rolling metrics instead of waiting for completion. Pollable by agents for live progress display:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "get_run_progress",
+    "arguments": { "run_id": "a1b2c3d4-..." }
+  }
+}
+```
+
+**Response (during run):**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "result": {
+    "run_id": "a1b2c3d4-...",
+    "status": "running",
+    "progress_pct": 67,
+    "current_stage": "running",
+    "stage_progress": {
+      "warmup": { "status": "completed", "duration_sec": 5 },
+      "running": { "status": "in_progress", "elapsed_sec": 20, "estimated_remaining_sec": 10 },
+      "cooldown": { "status": "pending" }
+    },
+    "rolling_summary": {
+      "duration_sec": 20,
+      "total_requests": 1900,
+      "throughput_req_per_sec": 95.0,
+      "error_rate_pct": 0.0,
+      "latency": {
+        "minMs": 2.1,
+        "p50Ms": 8.5,
+        "p90Ms": 22.3,
+        "p95Ms": 35.0,
+        "p99Ms": null,
+        "maxMs": 210.0
+      }
+    },
+    "events": [
+      { "time_sec": 5, "event": "warmup_complete" },
+      { "time_sec": 5.5, "event": "first_request_sent" },
+      { "time_sec": 15, "event": "throughput_stable", "value": "95 req/s" }
+    ]
+  }
+}
+```
+
+When the run completes, `get_run_progress` returns the same shape as `get_run` (status `completed` with full `summary`). Polling agents can transition from `get_run_progress` to `get_run` seamlessly.
 
 ### MCP error codes
 
@@ -675,12 +776,35 @@ Boehm verdicts can be mapped to SLO policies:
 interface PerfToolAdapter {
     val name: String
     val supportedTestTypes: List<TestType>
-    val version: String                  // adapter version, not tool version
-    val toolVersions: List<String>       // tested tool versions (e.g., ["k6 0.54.x"])
+    val version: String                     // adapter version, not tool version
+    val toolVersions: List<String>          // tested tool versions (e.g., ["k6 0.54.x"])
+    val supportsLiveProgress: Boolean       // true if adapter emits progress events
 
     fun validate(testPlan: TestPlan): List<ValidationError>
+
+    // Blocking run — returns the final result. Must be interruptible for timeout enforcement.
     fun run(testPlan: TestPlan): RunResult
+
+    // Non-blocking run with progress callback — optional, prefered when available.
+    // The callback is invoked periodically with intermediate metrics.
+    // Returns the final result when the run completes.
+    fun runWithProgress(
+        testPlan: TestPlan,
+        onProgress: (ProgressEvent) -> Unit
+    ): RunResult
 }
+```
+
+**ProgressEvent contract:**
+```kotlin
+data class ProgressEvent(
+    val type: String,                   // "stage_change" | "metric_update" | "log_line" | "warning" | "error"
+    val timestampSec: Double,           // seconds since run start
+    val progressPct: Double,            // 0.0 to 100.0
+    val currentStage: String,           // "warmup" | "running" | "cooldown"
+    val rollingSummary: RollingSummary?, // partial metrics as of this event
+    val message: String?                // human-readable status update
+)
 ```
 
 Adapters are discoverable — an agent can call `list_adapters` to see available tools with their supported test types and tested versions.

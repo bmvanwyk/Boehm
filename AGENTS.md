@@ -43,7 +43,7 @@ Read the design spec before changing behaviour.
 
 ### Rules
 
-1. **Adapter contract** — every tool adapter implements `PerfToolAdapter` interface producing normalized `RunResult`.
+1. **Adapter contract** — every tool adapter implements `PerfToolAdapter` interface producing normalized `RunResult`. Adapters SHOULD support live progress reporting via `runWithProgress`.
 2. **Skill-driven methodology** — engineering knowledge lives in opencode skill files, not in the MCP server.
 3. **Everything preserved** — every run stored; any run can be tagged as a baseline.
 4. **Investigation-first** — git integration identifies which commit and code change caused a regression.
