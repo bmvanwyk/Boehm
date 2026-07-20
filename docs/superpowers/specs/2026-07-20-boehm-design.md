@@ -44,6 +44,57 @@ Three things that make it an "engineer" rather than a test runner:
 4. Agent investigates: Tulip runs in-process vs k6/Gatling as shell exec — overhead difference explains it
 5. Documents the systematic offset in the baseline metadata
 
+## Authentication & Authorization
+
+### Auth model
+
+Boehm uses **bearer token** authentication for all MCP tool calls. Tokens are passed in the MCP `initialize` handshake via the `Authorization` header (HTTP/SSE transport) or an `auth_token` field in the `initialize` params (stdio transport).
+
+```json
+// stdio transport: initialize with auth
+{
+  "jsonrpc": "2.0",
+  "id": 0,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {},
+    "clientInfo": { "name": "claude-code", "version": "1.0.0" },
+    "auth_token": "boehm_sk_abc123..."
+  }
+}
+```
+
+### Roles
+
+| Role | Can | Cannot |
+|---|---|---|
+| **read-only** | `list_adapters`, `get_run`, `list_runs`, `list_baselines`, `get_baseline` | `run_test`, `mark_baseline`, `compare_with_baseline`, `validate_pr` |
+| **runner** | Everything read-only can + `run_test` | `mark_baseline`, `validate_pr` |
+| **baseline-manager** | Everything runner can + `mark_baseline`, `compare_with_baseline`, `list_baselines` | `validate_pr` |
+| **admin** | Everything | — |
+
+### Agent identity & impersonation controls
+
+- Each token is bound to a caller identity (`client_info.name` + `client_info.version` at minimum)
+- All state-changing operations are logged with the caller identity in `runs.metadata.caller` and `baseline_history.tagged_by`
+- Tokens are provisioned per environment: `BOEHM_TOKEN_CI` for CI pipelines, `BOEHM_TOKEN_DEV` for local agent use
+- If an agent calls `mark_baseline` or `validate_pr`, the identity is recorded for audit. No agent can impersonate another identity
+- CI tokens are short-lived (24h default, rotated by the CI platform); dev tokens are long-lived but require user confirmation at install
+- Baseline overrides (replacing an existing baseline with a new run) additionally require either:
+  - A signed commit in CI (the baseline change is part of a PR that was reviewed)
+  - A human confirmation in the agent's output ("I'm about to replace the baseline for http-api-load from run abc to run xyz. Approve?")
+  - The `BOEHM_BASELINE_TOKEN` environment variable set on the server (admin only)
+
+### Token lifecycle
+
+| Event | Action |
+|---|---|
+| Create | Server generates `boehm_sk_<random>` via CLI: `boehm token create --role runner --name ci-token` |
+| List | `boehm token list` shows all active tokens (prefix only, secret is one-way hashed) |
+| Revoke | `boehm token revoke <prefix>` — token is immediately rejected |
+| Rotate | CI tokens: auto-rotated by CI platform. Dev tokens: re-issued via `boehm token create` |
+
 ## Architecture
 
 ```
@@ -288,7 +339,7 @@ perf-mcp-server (Kotlin/JVM)
 2. **compare_with_baseline produces correct verdict:** A known-good baseline compared against itself returns `PASS` with zero deltas. A comparison with a known-regressed candidate returns `REGRESSION`.
 3. **Baseline staleness warning:** Comparing against a baseline older than the configured stale threshold (default 30 days) returns a warning message alongside the comparison.
 4. **Threshold override works:** Passing custom thresholds to `compare_with_baseline` changes the verdict boundary as expected.
-5. **False positive rate ≤10%:** Over 100 CI runs against a stable target, `compare_with_baseline` returns `REGRESSION` no more than 10 times (configurable thresholds, warmup applied).
+5. **False positive rate ≤10%:** Over a rolling 30-day window with ≥100 CI runs against a stable target (no production code changes deployed during the window), `compare_with_baseline` returns `REGRESSION` no more than 10 times. "Stable target" is a containerized httpbin or equivalent test double with no code changes during the measurement period. False positives are confirmed by human review of the raw output and test conditions.
 6. **list_runs returns paginated results:** `list_runs` with `limit=5` returns at most 5 results. Results are ordered by `created_at` descending.
 
 ### Phase 3 — Evals
@@ -304,7 +355,7 @@ perf-mcp-server (Kotlin/JVM)
 |---|---|---|---|
 | PR investigation time | < 5 min for 90th percentile | Wall-clock from agent invocation to report delivery | 6 |
 | False positive rate | ≤ 10% over 100 CI runs | `REGRESSION` verdicts on a stable target ÷ total runs | 2 |
-| CI decision determinism | 100% | Same commit + same baseline + same target = same verdict | 3 |
+| CI decision determinism | Targeted with guardrails | Same commit + same baseline + same target = same verdict within statistical noise. Residual variance from JIT warmup, GC, and network jitter is documented and bounded by flakiness mitigations | 3 |
 | Regressions caught pre-merge | Tracked (baseline) | Number of PRs where Boehm flagged a regression that would have merged | 6 |
 | MCP server overhead | < 50 ms p99 (excl. test exec) | Internal timing of orchestration + persistence per call | 2 |
 | Adapter coverage | ≥ 2 tools | Number of supported adapters with CI-tested fixtures | 4 |
@@ -506,30 +557,91 @@ jobs:
 | **Stale detection** | If baseline timestamp > configured days (default 30), comparison returns a warning but still executes |
 | **Environment tags** | `env` parameter in Phase 2 supports `staging`, `production`, `ci`, etc. Baselines are scoped by env |
 
-### Regression decision logic
+### Regression decision logic (multi-metric)
 
 ```
 compare_with_baseline runs → shortfall = candidate - baseline
 
-thresholds (per-test config):
-  p95_pct            default: 10.0   (percent)
-  p99_pct            default: 15.0   (percent)
-  error_rate_pp      default: 2.0    (percentage points)
-  throughput_drop_pct default: 15.0  (percent drop)
-
-if shortfall.p95_pct > threshold.p95_pct:
-    verdict = "REGRESSION"
-elif shortfall.p99_pct > threshold.p99_pct:
-    verdict = "REGRESSION"
-elif shortfall.error_rate_pp > threshold.error_rate_pp:
-    verdict = "REGRESSION"
-elif shortfall.throughput_pct < -threshold.throughput_drop_pct:
-    verdict = "REGRESSION"
-else:
-    verdict = "PASS"
+thresholds (per-test config, JSON):
+{
+  "p95_pct":             10.0,   // percent increase allowed
+  "p99_pct":             15.0,   // percent increase allowed
+  "error_rate_pp":       2.0,    // percentage points increase allowed
+  "throughput_drop_pct": 15.0,   // percent drop allowed
+  "decision_mode":       "any"   // "any" | "weighted" | "policy"
+}
 ```
 
-Thresholds are configurable per test scenario in the SQLite `test_scenarios.metadata` field. The defaults above serve as fallback. Threshold values are reference defaults — teams should tune per-service based on historical variance.
+**Decision modes:**
+
+| Mode | Behavior | Use case |
+|---|---|---|
+| `any` (default) | If ANY single metric breaches its threshold → `REGRESSION` | Strict gates, catch-all safety |
+| `weighted` | Each breached metric contributes a score. Sum > threshold score → `REGRESSION`. Weight config per metric | Reducing false positives from single-metric noise |
+| `policy` | External policy file (JSON or Rego) defines the decision tree | Complex multi-SLO environments |
+
+**Weighted mode formula:**
+
+```
+score = 0
+for each metric m:
+    if m.delta > m.threshold:
+        score += m.weight      // weights default: p95=0.4, p99=0.3, error=0.2, throughput=0.1
+if score >= 0.5 → REGRESSION
+```
+
+**Policy mode example (Rego-like):**
+```json
+{
+  "rules": [
+    { "if": "p95_delta > 20 AND error_delta > 1", "then": "REGRESSION" },
+    { "if": "p99_delta > 15 AND throughput_drop > 20", "then": "REGRESSION" },
+    { "if": "p95_delta > 10 OR p99_delta > 15", "then": "WARNING" },
+    { "else": "PASS" }
+  ]
+}
+```
+
+Thresholds are configurable per test scenario in the SQLite `test_scenarios.metadata` field. The defaults above serve as fallback. Teams should tune per-service based on historical variance.
+
+### Statistical method specification
+
+#### Percentile computation
+
+All percentiles are computed using **linear interpolation** between adjacent order statistics (the `R-7` method, default in most scientific libraries). This means:
+- p50 = median (average of two middle values if N is even)
+- p90, p95, p99 = linearly interpolated between the two nearest ranked observations
+- Adapters MUST document if they use a different method (e.g., HdrHistogram's bucketed approximation)
+
+#### Sample size guidance
+
+| Metric | Minimum samples | Recommended | Notes |
+|---|---|---|---|
+| p50 | 10 | 100+ | Median stabilizes quickly |
+| p90 | 50 | 500+ | Needs more data for stable tail |
+| p95 | 100 | 1000+ | Tail metric, sensitive to low N |
+| p99 | 500 | 5000+ | Needs significant traffic |
+
+If a run has fewer samples than the minimum for a requested percentile, that percentile is omitted from the summary with a warning in `metadata`.
+
+#### Confidence intervals (Phase 7)
+
+When comparison runs have sufficient samples (>1000), Boehm reports:
+- **p-value** from Mann-Whitney U test comparing the baseline and candidate latency distributions
+- **Effect size** (Cliff's delta): negligible (<0.147), small (0.147-0.33), medium (0.33-0.474), large (>0.474)
+- **Confidence interval** (95%) around the delta for each percentile (bootstrapped)
+
+Verdicts incorporate statistical significance only in `weighted` or `policy` mode. In `any` mode, raw thresholds apply regardless of significance.
+
+### Sampling & aggregation rules
+
+| Rule | Specification |
+|---|---|
+| **Warmup** | First N seconds of the test are excluded from all metrics. Default 5s, configurable per adapter |
+| **Cooldown** | After test duration expires, the run continues draining in-flight requests for up to cooldown seconds (default 3s). Cooldown metrics are excluded |
+| **`durationSec` definition** | Wall-clock time from warmup end to cooldown start. NOT total wall time |
+| **N-runs median** | When enabled, run the test plan N times (default 3) and take the median of each metric. Adds N× total duration. Recommended for CI gates where false positives are costly |
+| **N vs cost tradeoff** | N=3 is the default for CI gates. N=1 for local dev sanity checks. N=5+ only for establishing initial baselines. Cost scales linearly |
 
 ### Flakiness mitigation
 
@@ -538,6 +650,24 @@ Thresholds are configurable per test scenario in the SQLite `test_scenarios.meta
 - **Noise annotation** — `RunResult.metadata` can include `noise_level` from the adapter (e.g., "gc_pause_during_test")
 - **Statistical confidence** — Phase 7 adds p-value/confidence intervals to comparison results
 - **False positive budget** — tests that flake are flagged; repeated flaky tests (>10% false positive rate over 30 days) are quarantined to a separate report
+- **False positive rate measurement:** Measured over a rolling 30-day window against a stable known-good target. A "false positive" is a `REGRESSION` verdict that, upon human review, was caused by test noise rather than an actual code regression. The target is considered "stable" if no production code changes were deployed during the measurement window
+
+### SLO/SLA integration
+
+Boehm verdicts can be mapped to SLO policies:
+
+| Boehm verdict | SLO action | Alert severity |
+|---|---|---|
+| `PASS` | No action | — |
+| `WARNING` (policy mode) | Log, notify perf channel | Minor |
+| `REGRESSION` (single test) | Page on-call if test is SLO-critical, else file ticket | Major (SLO-critical) / Minor (other) |
+| `ERROR` (tool/infra failure) | Page SRE (test infrastructure degraded) | Critical |
+
+**SLO burn-rate integration:**
+- For each test scenario, teams can declare an `slo_budget` in the test plan metadata
+- `compare_with_baseline` emits the burn rate: `(error_budget_consumed / error_budget_total) * 100`
+- If burn rate exceeds 10%/week or 50%/quarter, the agent escalates automatically
+- SLO configuration lives in the test scenario metadata, not in the comparison call
 
 ## Adapter Interface
 
@@ -644,12 +774,30 @@ CREATE TABLE schema_version (
 
 ### Migration to PostgreSQL (when needed)
 
-SQLite is the default. If multi-team, high-volume, or concurrent-writer usage exceeds SQLite's capabilities:
+SQLite is the default and appropriate up to these limits (benchmarked on a standard CI VM with SSD):
 
-1. Abstract the store behind an interface from day one (`StoreRepository`)
-2. Implement a `PostgresStoreRepository` using the same interface
-3. Migration path: export SQLite → `pg_restore` → point config at `postgres://...`
-4. Trigger condition: sustained > 100 runs/hour or > 5 concurrent writers
+| Dimension | SQLite limit | Failure mode |
+|---|---|---|
+| Concurrent writers | >5 simultaneous | `SQLITE_BUSY` — writers contend on the same page |
+| Run volume | >100 runs/hour sustained | Query performance degrades on unoptimized queries |
+| Database size | >2 GB | Write throughput drops; VACUUM becomes expensive |
+| Concurrent readers | >50 simultaneous | Read throughput plateaus (single-writer lock) |
+| Data relationships | Complex cross-scenario joins at scale | SQLite handles simple joins well; complex analytical queries may be slow |
+
+Trigger conditions for migration:
+
+1. Sustained >100 runs/hour for 7 consecutive days
+2. >5 concurrent agents writing to the same database
+3. Database size exceeds 2 GB (configurable limit)
+4. Team requests multi-region or high-availability deployment
+
+Migration path:
+
+1. Store interface abstracted from day one (`StoreRepository` interface)
+2. Implement `PostgresStoreRepository` using the same interface
+3. Migration script: `.dump` from SQLite → schema transform → `pg_restore`
+4. Verification: run the eval suite against PostgreSQL, confirm all ACs pass
+5. Cutover: update `BOEHM_DATABASE_URL=postgres://...` and restart
 
 ### Run Scheduler & Isolation
 
@@ -744,30 +892,66 @@ SQLite is the default. If multi-team, high-volume, or concurrent-writer usage ex
 
 ### ACL model
 
-| Operation | Who can invoke | Phase |
-|---|---|---|
-| `list_adapters`, `get_run`, `list_runs`, `list_baselines` | Any connected client | 1 |
-| `run_test` | Any connected client (but must have access to the target) | 1 |
-| `mark_baseline`, `get_baseline`, `compare_with_baseline` | Any connected client (baseline changes are audited) | 2 |
-| `mark_baseline` override (replace existing) | Requires `BOEHM_BASELINE_TOKEN` env var or explicit agent approval | 2 |
-| `validate_pr` | Any connected client (operates on local repo) | 6 |
+The MCP server enforces role-based access using bearer tokens. See [Authentication & Authorization](#authentication--authorization) for roles and token lifecycle.
 
-### Shell adapter threat model
+| Operation | Minimum role | Audit logged | Phase |
+|---|---|---|---|
+| `list_adapters` | read-only | No | 1 |
+| `get_run`, `list_runs`, `list_baselines`, `get_baseline` | read-only | No | 1 |
+| `run_test` | runner | Yes (caller identity + test plan hash) | 1 |
+| `mark_baseline` | baseline-manager | Yes (caller + previous baseline history) | 2 |
+| `compare_with_baseline` | baseline-manager | No | 2 |
+| `mark_baseline` override (replace existing) | baseline-manager + confirmation | Yes (previous baseline archived to history) | 2 |
+| `validate_pr` | admin | Yes (full audit trail of git operations) | 6 |
+
+### Shell adapter sandboxing
 
 | Threat | Mitigation |
 |---|---|
-| Command injection via test plan | Test plans define parameters (rate, duration, URL), not shell commands. Adapters build CLI args using parameterized exec |
-| Arbitrary file read via tool | Each adapter validates the target URL/command before execution. k6 adapter rejects non-HTTP targets |
-| Resource exhaustion | Max run duration enforced by timeout (configurable, default 10 min). Queue depth limits incoming runs |
-| Sensitive data in raw output | Raw output files stored with 0600 permissions. Adapter strips known sensitive headers before persisting |
-| Git repo manipulation | `validate_pr` rejects dirty working trees. Uses `git stash` push/pop, never `git reset --hard` |
+| Command injection via test plan | Test plans define parameters (rate, duration, URL), not shell commands. Adapters build CLI args using `ProcessBuilder` with arg list (not shell string concat). Test plan JSON is validated against a schema that rejects unexpected keys |
+| Arbitrary file read via tool | Each adapter validates the target URL/command before execution. k6 adapter rejects non-HTTP targets. JMeter adapter restricts to specified `.jmx` files in the test suite directory |
+| Resource exhaustion | Max run duration enforced by per-adapter timeout (configurable, default 10 min). Queue depth limits incoming runs (default 20). Per-adapter memory limit via JVM container memory cgroup |
+| Container sandboxing (Phase 4+) | Adapters SHOULD run tool subprocesses inside ephemeral containers with: read-only rootfs, dropped capabilities (`--cap-drop ALL`), seccomp profile (default docker seccomp), no network access except to the target URL, memory limit (256 MB default per tool), CPU limit (0.5 cores default) |
+| Raw output size limits | Raw output truncated at 10 MB per run. Adapter streams output to a temp file and stops writing at the limit |
+| Git repo manipulation | `validate_pr` rejects dirty working trees. Uses `git stash push/pop`, never `git reset --hard`. Lock file in `TMPDIR` prevents concurrent git operations |
 
-### Credential handling
+### Raw output sensitivity
+
+**Headers stripped by default (allowlist approach):**
+All headers are stripped by default. The adapter maintains an allowlist of safe headers to preserve:
+
+```kotlin
+// Default allowlist (adapter-specific, k6 example)
+val SAFE_HEADERS = setOf(
+    "content-type", "content-length", "accept", "accept-encoding",
+    "cache-control", "user-agent", "x-request-id", "x-trace-id"
+)
+// Everything else (authorization, cookie, set-cookie, x-api-key, etc.) is redacted
+// as "REDACTED_BY_BOEHM" in raw output
+```
+
+**Path/query parameter redaction:**
+Adapters SHOULD redact path segments and query parameters matching known sensitive patterns (e.g., `/token/`, `?api_key=`, `?secret=`). This is a best-effort filter — the agent is responsible for not including sensitive URLs in test plans.
+
+**File permissions:**
+- Raw output files: `0600` (owner read/write only)
+- SQLite database: `0600`
+- Token configuration file: `0600`
+
+### Encryption at rest
+
+- SQLite database: **Not encrypted by default**. For environments requiring encryption at rest, the entire `~/.boehm/` directory should be encrypted at the filesystem level (LUKS, eCryptfs, or platform equivalent)
+- Raw output files: same filesystem-level encryption as the database
+- Token secrets: bcrypt-hashed in the token store. The plaintext secret is shown once at creation and never stored
+
+### Secret handling & rotation
 
 - Tool credentials (API keys, tokens) are passed via environment variables, not in test plans
 - Example: `K6_CLOUD_TOKEN` for k6 cloud, `TULIP_API_KEY` for Tulip
-- Agents should inject credentials into the MCP server's environment at startup
-- No credentials stored in SQLite
+- Agents inject credentials into the MCP server's environment at startup
+- No credentials stored in SQLite or raw output files
+- Token rotation: CI tokens auto-rotate every 24h. Server tokens rotated via `boehm token revoke && boehm token create`
+- If a raw output accidentally captures a credential, the run can be deleted and re-run (standard data retention purge route)
 
 ## Environment Reproducibility
 
@@ -952,7 +1136,227 @@ Compare results from different tools running the same test scenario to validate 
 | **Git checkout races with other work** | Low | High | `validate_pr` checks for dirty working tree and rejects if uncommitted changes exist. Stashes/restores cleanly. Lock file in TMPDIR prevents concurrent git operations |
 | **MCP ecosystem is evolving** | Medium | Medium | Kotlin MCP SDK may not exist yet — fallback is implementing JSON-RPC 2.0 protocol directly over stdio, which is ~500 lines. Protocol is well-documented |
 
-## Implementation Phases
+## Data Deletion & GDPR
+
+### Deletion APIs
+
+| Operation | Tool | Impact |
+|---|---|---|
+| Delete single run | `delete_run(run_id)` | Removes the run record from SQLite and deletes the raw output file. Fails if the run is tagged as a baseline |
+| Delete scenario | `delete_scenario(tool, test_name, env?)` | Removes the scenario and ALL its runs. Requires explicit `--force` flag. All associated baselines are archived to `baseline_history` |
+| Purge old runs | `purge_runs(before=date, status=failed)` | Batch deletes runs older than the given date. Used for automated retention enforcement |
+| Export data | `export_runs(tool?, test_name?, format=csv)` | Exports run summaries in CSV or JSON format for data portability |
+
+### Retention policies (configurable)
+
+| Data type | Default retention | Configuration |
+|---|---|---|
+| Run summaries (SQLite) | Indefinite | `BOEHM_RETENTION_SUMMARY_DAYS` (set to 0 for indefinite) |
+| Raw output files | 90 days | `BOEHM_RETENTION_RAW_DAYS` |
+| Failed runs (not baseline-tagged) | 30 days | `BOEHM_RETENTION_FAILED_DAYS` |
+| Baseline history | Indefinite (audit requirement) | Not configurable — append-only |
+| Server access logs (stdout) | Managed by deployment platform | — |
+| Token records | Indefinite (revoked tokens retained for audit) | `BOEHM_RETENTION_TOKENS_DAYS` after revocation |
+
+### Portability
+
+- Full SQLite backup: `sqlite3 ~/.boehm/boehm.db ".backup ~/boehm-backup.db"`
+- Export all runs as JSON: `boehm export --format json --output boehm-export.json`
+- Schema version is embedded in the database — old formats are readable for one major version
+
+### PII handling
+
+- Boehm does not collect user names, emails, or IP addresses beyond what is in the MCP `clientInfo` field
+- The `clientInfo` field is stored in `runs.metadata.caller` for audit purposes
+- Test plans and target URLs may contain PII (e.g., `https://api.example.com/user/12345/profile`). The agent is responsible for avoiding PII in test plans
+- Raw output redaction (see [Raw output sensitivity](#raw-output-sensitivity)) strips known sensitive headers. Path redaction is best-effort
+
+## Operational Cost & Scale Guidance
+
+### Resource sizing
+
+| Deployment | RAM | CPU | Disk | Typical throughput |
+|---|---|---|---|---|
+| Local dev / single dev | 512 MB | 1 core | 1 GB | ~10 runs/day |
+| Small team CI (5-10 devs) | 1 GB | 2 cores | 10 GB | ~50 runs/day |
+| Team CI (10-50 devs) | 2 GB | 4 cores | 50 GB | ~200 runs/day |
+| Organization CI (50+ devs) | 4 GB | 8 cores | 200 GB | ~1000 runs/day, recommend PostgreSQL |
+
+### Cost per run
+
+| Operation | Wall clock | Cost factor |
+|---|---|---|
+| k6 30s HTTP test (100 RPS) | ~35s (incl. warmup + cooldown) | Low — single binary, no JVM |
+| JMeter 60s test | ~65s | Medium — JVM startup per run |
+| Tulip in-process | ~35s | Low — same JVM as Boehm |
+| `compare_with_baseline` | <100ms | Negligible — SQLite query + arithmetic |
+| `validate_pr` (10 commits, no bisect) | ~2 × run duration | 2 runs (base + head) |
+| `validate_pr` with bisect (10 commits) | ~5 × run duration | Base + head + 3 bisect runs |
+
+### Recommended parallelism defaults
+
+| Environment | Default parallelism | Max queue depth | Rationale |
+|---|---|---|---|
+| Local dev | 1 (serial) | 5 | Noisy neighbor is yourself |
+| CI (single repo) | 1 (serial) | 20 | Measurement integrity > throughput |
+| CI (monorepo, multiple services) | 2 `isolation_group`s | 40 | Services are independent; groups can run concurrently |
+| CI (large org) | 4 `isolation_group`s | 80 | Higher throughput, but require dedicated CI runners |
+
+### Limits and guardrails
+
+| Resource | Limit | Configurable? |
+|---|---|---|
+| Max run duration | 10 min | Yes |
+| Max queue depth | 20 | Yes |
+| Max concurrent isolation groups | 2 (default) | Yes |
+| Max bisect runs per `validate_pr` | 10 | Yes |
+| Max raw output file size | 10 MB | Yes |
+| SQLite DB size (warning at) | 500 MB | Yes |
+| SQLite DB size (hard cap) | 2 GB | Yes |
+| N-runs median max N | 10 | Yes |
+
+Hard limits are configurable via environment variables. Exceeding a limit produces a clear error message, not a crash.
+
+## UI/UX Surface
+
+### Primary interface: MCP (agent-driven)
+
+The primary UX is the MCP protocol consumed by AI agents. Agents present results in natural language with embedded tables and charts. Boehm itself does not render UI.
+
+### PR comments (Phase 6)
+
+When `validate_pr` runs in CI, it produces a Markdown report suitable for PR comments:
+
+```markdown
+## Performance Check: http-api-load
+
+| Metric | Baseline | Candidate | Delta | Threshold | Verdict |
+|---|---|---|---|---|---|
+| p95 latency | 28.0 ms | 35.0 ms | **+25.0%** | +10% | ❌ FAIL |
+| p99 latency | 55.0 ms | 68.1 ms | **+23.8%** | +15% | ❌ FAIL |
+| Error rate | 0.0% | 0.0% | 0.0pp | +2pp | ✅ PASS |
+| Throughput | 100/s | 95/s | -5.0% | -15% | ✅ PASS |
+
+**Verdict: REGRESSION** — p95 and p99 exceeded thresholds.
+
+```mermaid
+xychart-beta
+  title "Latency Comparison: Baseline vs Candidate"
+  x-axis "Percentile" ["p50", "p90", "p95", "p99"]
+  y-axis "Latency (ms)" 0 --> 80
+  bar [8.5, 22.3, 28.0, 55.0]
+  bar [8.5, 22.3, 35.0, 68.1]
+```
+
+**First bad commit:** `abc123def` — "Increase connection pool timeout" by dev@example.com
+```
+
+### Baseline management (human overrides)
+
+Baseline operations are performed through MCP tool calls by agents. The agent will prompt the user before destructive operations:
+
+> **Agent:** "The baseline for `http-api-load` was last updated 45 days ago. The current run shows p95 within range. Shall I update the baseline to this run? (This will archive the old baseline to history.)"
+
+Human confirms, agent calls `mark_baseline`. Rejection leaves the old baseline in place. All changes are logged in `baseline_history`.
+
+### Lightweight web dashboard (Phase 5+)
+
+A optional read-only web dashboard (static HTML/JS, served by the MCP server on a separate port) provides:
+- **Run history** — filterable table of recent runs with status, tool, scenario, verdict
+- **Baseline status** — current baselines with age and last comparison result
+- **Trend view** — p50/p90/p99 plotted over the last N runs (Mermaid chart rendered in browser)
+- **No write operations** — all mutations go through MCP (agent-driven or CLI)
+
+The dashboard is a **Phase 5+ optional deliverable**, not part of the MVP.
+
+## Testing & CI Quality Gates
+
+### Test doubles
+
+For stable CI testing, use the `boehm-mock` adapter (shipped with the server):
+
+```kotlin
+// Returns deterministic RunResult from fixture data without executing any tool
+class MockAdapter(private val fixturePath: String) : PerfToolAdapter {
+    override val name = "mock"
+    override fun run(testPlan: TestPlan): RunResult {
+        return loadFixture(testPlan.testName)  // reads from test fixtures
+    }
+}
+```
+
+This decouples Boehm's own CI from needing live targets. Integration tests against real targets (httpbin.org) run on a schedule, not on every commit.
+
+### Blue-green CI harness
+
+For teams running Boehm in production CI:
+- **Blue environment** — stable, known-good target (containerized httpbin or a dedicated test service)
+- **Green environment** — canary target running the candidate code
+- Boehm runs the same test suite against both, compares results
+- If blue vs green delta exceeds thresholds, the candidate is likely the cause
+- If blue vs last baseline delta also exceeds thresholds, the test infrastructure is noisy — flag as infrastructure issue, not code regression
+
+### CI test matrix
+
+```yaml
+strategy:
+  matrix:
+    os: [ubuntu-latest]
+    adapter: [k6, jmeter, tulip]
+    test-type: [http, grpc]  # per adapter capability
+    include:
+      - adapter: k6
+        tool-version: "0.54.0"
+      - adapter: jmeter
+        tool-version: "5.6.3"
+```
+
+### Canary strategy for CI adoption
+
+1. **Shadow mode** — Boehm runs in CI but exits 0 regardless. Results logged but non-blocking (2 weeks)
+2. **Warning mode** — Boehm posts PR comments with results but does not block merge (2 weeks)
+3. **Advisory mode** — Boehm blocks merge for `REGRESSION` on critical tests only (ongoing)
+4. **Hard block** — Boehm blocks merge for all `REGRESSION` (after tuning thresholds per test)
+
+This gradual rollout prevents noisy CI from blocking development velocity.
+
+## Incident & Rollback Playbook
+
+### Scenario: False positive regression blocks merge
+
+1. Developer sees Boehm flagged `REGRESSION` on their PR
+2. Developer reviews the report — suspects false positive (e.g., noisy test infrastructure)
+3. Developer re-runs the test: `boehm run-test --rerun --test-name http-api`
+4. If the second run passes:
+   - Result is reported to the agent: "The first run was likely noisy. Second run: PASS."
+   - The original `REGRESSION` is annotated in `runs.metadata` with the re-run `run_id`
+5. If the second run also fails:
+   - The regression is likely real. Developer investigates the code change.
+   - If still suspected false positive, notify the perf team via the configured channel
+
+### Scenario: Baseline needs emergency rollback
+
+1. A baseline was incorrectly tagged (wrong environment, wrong run, data corruption)
+2. **Rollback:** `boehm mark-baseline --tool k6 --test-name http-api --run-id <previous-good-run-id>`
+3. The current baseline is moved to `baseline_history` with `superseded_by` pointing to the replacement
+4. The `superseded_at` timestamp and `tagged_by` identity are logged for audit
+5. The agent reports: "Baseline for http-api rolled back to run from 2026-07-15 (was incorrectly set to a staging-environment run)"
+
+### Scenario: Test infrastructure is broken
+
+1. Boehm returns `ERROR` verdicts for all runs (tool not found, target unreachable)
+2. **Immediate:** Page SRE — check tool binary versions, target service health, network connectivity
+3. **Short-term:** Pin tool versions in docker-compose or CI config to eliminate version drift as a cause
+4. **Long-term:** Add health check endpoint to Boehm (`boehm health`) that verifies all configured adapters and the SQLite database
+
+### Escalation path
+
+| Issue | First response | Escalation |
+|---|---|---|
+| False positive regression | Developer re-runs test | Perf team if persistent (>3 false positives per test per week) |
+| Baseline rollback needed | Baseline-manager role uses `mark-baseline` | Admin if the desired run has been purged |
+| Tool adapter failure | Developer checks tool version | SRE if infrastructure issue; adapter maintainer if adapter bug |
+| SQLite corruption | Restore from backup | Admin if no backup available |
 
 ### Phase 1 — MCP Server Scaffold + First Adapter
 - Gradle project setup with MCP protocol support (direct JSON-RPC or SDK)
@@ -966,18 +1370,24 @@ Compare results from different tools running the same test scenario to validate 
 ### Phase 2 — Baseline & Comparison
 - `mark_baseline`, `get_baseline`, `list_baselines`, `compare_with_baseline`, `list_runs` tools
 - Baseline lifecycle with env tags
-- Threshold configuration and regression decision logic
+- Multi-metric regression decision logic (any/weighted/policy modes)
+- Statistical method specification (R-7 percentile interpolation, sample size guidance)
+- Sampling & aggregation rules (warmup, cooldown, N-runs median)
 - Baseline staleness detection
+- SLO burn-rate integration in comparison output
 - `isolation_group` support for opt-in parallelism
+- Raw output sensitivity (header allowlist, path redaction)
 - Unit tests + integration tests
-- Fixed: false positive rate ≤10%
+- Fixed: false positive rate ≤10% over 30-day rolling window
 
 ### Phase 3 — Evals
 - Adapter fixture test suite (stored inputs/outputs)
-- Determinism verification
+- False positive measurement harness (stable test double target, rolling window computation)
 - Crash recovery testing
 - Schema migration tests
 - Protocol compliance tests
+- Storage limits testing (10 MB raw output cap, DB size warnings)
+- Encryption at rest verification
 
 ### Phase 4 — Additional Adapters
 - Second adapter
@@ -1005,8 +1415,8 @@ Compare results from different tools running the same test scenario to validate 
 ## Non-Goals (Phase 1-3)
 
 - HTML report rendering — use Markdown + Mermaid
-- GUI or dashboard — out of scope for Phases 1-3; may be reconsidered later
-- Cloud-hosted database — local SQLite always; PostgreSQL migration path documented
+- GUI or dashboard — out of scope for Phases 1-3; lightweight read-only dashboard is Phase 5+ optional
+- Cloud-hosted database — local SQLite always; PostgreSQL migration path documented for multi-team scale
 - Fully unsupervised PR blocking — human-in-the-loop for threshold changes and baseline management
 - Support for non-CLI tools (e.g., cloud-hosted load generators) — future consideration
 - Concurrent test execution by default — serial by design; opt-in via `isolation_group`
