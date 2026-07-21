@@ -13,34 +13,15 @@ Boehm is not just a test runner. It's an engineer with:
 
 ## Who it's for
 
-- **Performance engineers** reviewing PRs — "Did this change introduce a regression? Which commit?"
-- **SREs** running CI gates — deterministic pass/fail on perf tests, no false alarms
-- **Developers** sanity-checking local changes — "Does this refactor affect throughput?"
-- **QA leads** standardizing perf testing across teams — one way to define and track tests
-
-## What it does
-
-- **Runs tests** against any supported tool through a single MCP interface
-- **Tracks baselines** — mark a run as baseline, compare any future run against it
-- **Serializes execution** — one test at a time, no overlapping noise in measurements
-- **Investigates PRs** — checks out base vs head, runs tests, compares, bisects commits
-- **Analyzes deeply** — distribution comparison, trend detection, anomaly flagging (Phases 6-7)
-- **Reports via skills** — reusable agent workflows produce Markdown + Mermaid reports
-
-## Phases
-
-| Phase | What |
-|---|---|
-| 1 | MCP server scaffold + Tulip adapter |
-| 2 | Baseline store, comparison, regression thresholds |
-| 3 | Evals and correctness testing |
-| 4 | More tool adapters |
-| 5 | Skills and agent integration |
-| 6 | Git PR integration + commit bisect |
-| 7 | Advanced statistical analysis |
+- **Performance engineers** reviewing PRs
+- **SREs** running CI gates
+- **Developers** sanity-checking local changes
+- **QA leads** standardizing perf testing across teams
 
 ## Status
 
-Design finalized. Ready for implementation planning.
+**Building Phase 1** — MCP server scaffold with Tulip adapter. Bearer token auth, serial run queue, live progress reporting.
 
-See `docs/superpowers/specs/2026-07-20-boehm-design.md` for the full spec.
+See [`docs/superpowers/specs/2026-07-20-boehm-phase-1.md`](docs/superpowers/specs/2026-07-20-boehm-phase-1.md) for the active spec.
+
+Full product vision at [`docs/superpowers/specs/2026-07-20-boehm-vision.md`](docs/superpowers/specs/2026-07-20-boehm-vision.md).
