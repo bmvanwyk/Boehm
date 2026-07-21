@@ -5,8 +5,9 @@
 # and declares which parameters can be overridden at runtime.
 #
 # The `output` field tells Boehm where to find the tool's results after execution.
-#   - For Tulip: output path is embedded in the config JSON (actions.output_filename)
-#   - For k6/JMeter: output path is passed via CLI arg template ({{output_file}})
+#   - For JSON-based tools (Tulip): output path is embedded in the config JSON
+#   - For script-based tools (k6, JMeter, Gatling): output is {{output_file}}
+#   - For CLI-only tools (vegeta, wrk): output is {{output_file}} or stdout
 #
 # Consistency of measurement: the same template file is used every run,
 # so test structure never drifts. Only the declared override params vary.
@@ -25,13 +26,12 @@ tools:
     profiles:
       http-get:
         description: >
-          HTTP GET via TestHttpUser.action3 against a target base URL.
-          Issues GET /posts/{id} requests through Spring RestClient.
+          HTTP GET via TestHttpUser against a target base URL.
         config: profiles/tulip/http-get.jsonc
         output:
-          path: "{{config.actions.output_filename}}"  # read from config JSON after overrides applied
+          path: "{{config.actions.output_filename}}"
           format: json
-          schema: tulip-results   # maps to TulipParser
+          schema: tulip-results
         overrides:
           target_url:
             path: "actions.user_params.url"
@@ -66,24 +66,27 @@ tools:
     description: "Load testing tool by Grafana (JavaScript)"
     install: "brew install k6"
     run:
-      command: "k6 run --out json={{output_file}} {{script_file}}"
+      command: >
+        k6 run
+        -e TARGET_URL={{target_url}}
+        -e RATE_PER_SEC={{rate_per_sec}}
+        -e DURATION_SEC={{duration_sec}}
+        --out json={{output_file}}
+        {{config_file}}
     profiles:
       http-get:
-        description: "Simple HTTP GET with configurable rate and duration"
+        description: "HTTP GET with configurable rate and duration"
         config: profiles/k6/http-get.js
         output:
-          path: "{{output_file}}"  # set by adapter via command template
-          format: jsonl  # k6 outputs newline-delimited JSON
+          path: "{{output_file}}"
+          format: jsonl
           schema: k6-jsonl
         overrides:
           target_url:
-            path: "script.env.TARGET_URL"
             default: "https://httpbin.org/get"
           rate_per_sec:
-            path: "script.options.scenarios.main.rate"
             default: 50
           duration_sec:
-            path: "script.options.scenarios.main.duration"
             default: 30
 
   # ── JMeter ────────────────────────────────────────────────────────────
@@ -91,24 +94,28 @@ tools:
     description: "Apache JMeter (Java, GUI + CLI)"
     install: "brew install jmeter"
     run:
-      command: "jmeter -n -t {{plan_file}} -l {{results_file}} -j {{log_file}}"
+      command: >
+        jmeter
+        -Jtarget_url={{target_url}}
+        -Jthreads={{threads}}
+        -Jduration_sec={{duration_sec}}
+        -n -t {{config_file}}
+        -l {{output_file}}
+        -j {{output_file}}.log
     profiles:
       http-get:
         description: "HTTP GET via JMeter Thread Group"
         config: profiles/jmeter/http-get.jmx
         output:
-          path: "{{results_file}}"
-          format: csv  # JMeter JTL is CSV by default
+          path: "{{output_file}}"
+          format: csv
           schema: jmeter-csv
         overrides:
           target_url:
-            path: "jmx.arguments.url"
             default: "https://httpbin.org/get"
           threads:
-            path: "jmx.threadGroup.numThreads"
             default: 10
           duration_sec:
-            path: "jmx.threadGroup.duration"
             default: 30
 
   # ── Gatling ───────────────────────────────────────────────────────────
@@ -116,13 +123,19 @@ tools:
     description: "Scala-based load testing by Gatling Corp"
     install: "brew install gatling"
     run:
-      command: "gatling run -s {{simulation_class}} -rf {{output_dir}}"
+      command: >
+        gatling run
+        -Dtarget_url={{target_url}}
+        -Drate_per_sec={{rate_per_sec}}
+        -Dduration_sec={{duration_sec}}
+        -s profiles.HttpGetSimulation
+        -rf {{output_file}}.results
     profiles:
       http-get:
         description: "HTTP GET via Gatling simulation"
         config: profiles/gatling/http-get.scala
         output:
-          path: "{{output_dir}}/js/global_stats.json"  # Gatling writes a stats JSON
+          path: "{{output_file}}.results/js/global_stats.json"
           format: json
           schema: gatling-stats
         overrides:
@@ -140,8 +153,11 @@ tools:
     run:
       command: >
         echo 'GET {{target_url}}'
-        | vegeta attack -rate={{rate}} -duration={{duration}}s -output={{output_file}}
-        && vegeta report --type=json {{output_file}}
+        | vegeta attack
+          -rate={{rate_per_sec}}
+          -duration={{duration_sec}}s
+          -output={{output_file}}.bin
+        && vegeta report --type=json {{output_file}}.bin > {{output_file}}
     profiles:
       http-get:
         description: "HTTP GET at constant rate"
@@ -162,12 +178,18 @@ tools:
     description: "HTTP benchmarking tool (C, single binary)"
     install: "brew install wrk"
     run:
-      command: "wrk -t{{threads}} -c{{connections}} -d{{duration}}s --latency {{target_url}}"
+      command: >
+        wrk
+        -t{{threads}}
+        -c{{connections}}
+        -d{{duration_sec}}s
+        --latency
+        {{target_url}}
     profiles:
       http-get:
         description: "HTTP GET with fixed concurrency"
         output:
-          path: "stdout"  # wrk writes results to stdout
+          path: "stdout"
           format: text
           schema: wrk-text
         overrides:

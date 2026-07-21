@@ -59,29 +59,39 @@ class CatalogAdapter(
         outputDir.mkdirs()
         val outputFile = File(outputDir, "${Instant.now().toString().replace(":", "-")}.json")
 
-        // Load config template, apply overrides, inject output path, write temp file
+        // Load config template (JSON-based: apply overrides; script-based: copy as-is)
         val configAndOutput = if (profile.config != null) {
             val templateFile = File(baseDir, profile.config)
             if (!templateFile.exists()) {
                 return failedResult(testPlan, "Config template not found: ${templateFile.absolutePath}")
             }
-            val rawTemplate = templateFile.readText()
-            val cleanTemplate = stripJsoncComments(rawTemplate)
-            val modifiedJson = applyJsonOverrides(cleanTemplate, profile, overrides)
+            val isJsonConfig = templateFile.name.endsWith(".json") || templateFile.name.endsWith(".jsonc")
+            val (preparedJson, outPath) = if (isJsonConfig) {
+                val rawTemplate = templateFile.readText()
+                val cleanTemplate = stripJsoncComments(rawTemplate)
+                val modifiedJson = applyJsonOverrides(cleanTemplate, profile, overrides)
 
-            // Inject output path into config JSON at the path declared in output.path
-            val configRoot = JsonParser.parseString(modifiedJson).asJsonObject
-            val configPattern = Regex("""\{\{config\.(.+?)\}\}""")
-            val configMatch = configPattern.find(profile.output.path)
-            if (configMatch != null) {
-                val configJsonPath = configMatch.groupValues[1]
-                setJsonPath(configRoot, configJsonPath, outputFile.absolutePath)
+                // Inject output path into config JSON at the path declared in output.path
+                val configRoot = JsonParser.parseString(modifiedJson).asJsonObject
+                val configPattern = Regex("""\{\{config\.(.+?)\}\}""")
+                val configMatch = configPattern.find(profile.output.path)
+                if (configMatch != null) {
+                    val configJsonPath = configMatch.groupValues[1]
+                    setJsonPath(configRoot, configJsonPath, outputFile.absolutePath)
+                }
+                val finalJson = GsonBuilder().setPrettyPrinting().create().toJson(configRoot)
+                val tmpConfig = writeTempConfig(finalJson)
+                val resolvedPath = resolveOutputPath(profile.output.path, tmpConfig, outputFile.absolutePath)
+                Pair(tmpConfig, resolvedPath)
+            } else {
+                // Script-based tools: copy template as-is without mutation
+                val tmpDir = Files.createTempDirectory("boehm-${toolDef.name}-").toFile()
+                val tmpFile = File(tmpDir, templateFile.name)
+                templateFile.copyTo(tmpFile, overwrite = true)
+                val resolvedPath = resolveOutputPath(profile.output.path, null, outputFile.absolutePath)
+                Pair(tmpFile, resolvedPath)
             }
-            val finalJson = GsonBuilder().setPrettyPrinting().create().toJson(configRoot)
-
-            val tmpConfig = writeTempConfig(finalJson)
-            val outPath = resolveOutputPath(profile.output.path, tmpConfig, outputFile.absolutePath)
-            Pair(tmpConfig, outPath)
+            Pair(preparedJson, outPath)
         } else {
             Pair(null, resolveOutputPath(profile.output.path, null, outputFile.absolutePath))
         }
