@@ -71,8 +71,14 @@ graph TB
 
     subgraph "Adapter Layer"
         AdapterInterface["PerfToolAdapter"]
-        TulipAdapter["TulipAdapter.kt<br/>config generation + CLI exec"]
+        CatalogLoader["CatalogLoader.kt<br/>parse catalog.yaml"]
+        CatalogAdapter["CatalogAdapter.kt<br/>template + overrides + exec"]
         TulipParser["TulipParser.kt<br/>native JSON → RunResult"]
+    end
+
+    subgraph "Catalog"
+        CatalogYaml["catalog.yaml<br/>tool definitions + profiles"]
+        Templates["profiles/&lt;tool&gt;/*<br/>config templates"]
     end
 
     subgraph "Model"
@@ -81,14 +87,17 @@ graph TB
 
     Agent["AI Agent"]
 
+    CatalogLoader --> CatalogYaml
     Agent --> McpHandler
     McpHandler --> AuthHandler
     McpHandler --> Orchestrator
     Orchestrator --> Scheduler
     Orchestrator --> Store
-    Scheduler --> TulipAdapter
-    TulipAdapter --> TulipParser
-    TulipAdapter --> Models
+    Scheduler --> CatalogAdapter
+    CatalogAdapter --> CatalogLoader
+    CatalogAdapter --> Templates
+    CatalogAdapter --> TulipParser
+    CatalogAdapter --> Models
     TulipParser --> Models
     Store --> SQLite[(SQLite)]
 ```
@@ -125,9 +134,9 @@ sequenceDiagram
     participant RunService
     participant Scheduler
     participant Store
-    participant TulipAdapter
+    participant CatalogAdapter
 
-    Agent->>McpServer: tools/call run_test
+    Agent->>McpServer: tools/call run_test { tool, test_plan }
     McpServer->>RunService: createRun(testPlan)
     RunService->>Store: INSERT pending run
     Store-->>RunService: run_id
@@ -135,9 +144,9 @@ sequenceDiagram
     McpServer-->>Agent: result
 
     RunService->>Scheduler: enqueue(run_id)
-    Scheduler->>TulipAdapter: execute(run_id, testPlan)
-    TulipAdapter->>TulipAdapter: spawn process, capture output, write raw file
-    TulipAdapter->>Store: update status/progress/final result
+    Scheduler->>CatalogAdapter: execute(run_id, testPlan)
+    CatalogAdapter->>CatalogAdapter: load template, apply overrides, spawn CLI, capture
+    CatalogAdapter->>Store: update status/progress/final result
 ```
 
 ### get_run / get_run_progress / server_status
@@ -212,19 +221,21 @@ interface PerfToolAdapter {
     val toolVersions: List<String>
 
     fun validate(testPlan: TestPlan): List<ValidationError>
-    fun run(testPlan: TestPlan, progressSink: ProgressSink): RunResult
+    fun run(testPlan: TestPlan): RunResult
 }
 ```
 
-Where `ProgressSink` is a minimal callback for emitting progress snapshots while the tool is running. The adapter is responsible for:
+The adapter is responsible for:
 
-- constructing the subprocess command (and any required config files — e.g., the Tulip adapter generates a temporary JSON config mapped from the `TestPlan` and passes it via `--config <file>`)
-- capturing stdout/stderr
-- writing raw output to disk atomically
-- parsing the tool output into a normalized `RunResult`
-- emitting best-effort progress updates while the process is running
+- Loading the profile config template from `profiles/<tool>/`
+- Applying overrides via JSON path (for JSON configs like Tulip) or copying as-is (for script-based tools like k6, JMeter, Gatling)
+- Generating temporary config files and resolving output paths
+- Constructing the CLI command from `catalog.yaml` with template variable substitution (`{{config_file}}`, `{{output_file}}`, `{{target_url}}`, etc.)
+- Executing via `bash -c` to handle pipes, redirects, and command chaining
+- Capturing stdout and reading output from the declared output path
+- Parsing tool output into a normalized `RunResult` via a registered parser (`tulip-results`, `k6-jsonl`, etc.)
 
-The rest of the system should not care whether the underlying tool is Tulip, k6, or something else.
+The rest of the system should not care which tool is being run — it consumes normalized `RunResult` objects from SQLite.
 
 ---
 
@@ -273,12 +284,22 @@ The server should avoid silently swallowing failures and should preserve enough 
 ```text
 Boehm/
 ├── build.gradle.kts
-├── settings.gradle.kts
+├── catalog.yaml                     # Tool index: profiles, overrides, parsers
+├── profiles/
+│   ├── tulip/http-get.jsonc         # Tulip config template (JSONC)
+│   ├── tulip/demo.jsonc
+│   ├── k6/http-get.js               # k6 script template
+│   ├── jmeter/http-get.jmx          # JMeter plan template
+│   └── gatling/http-get.scala       # Gatling simulation template
 ├── src/
 │   ├── main/kotlin/io/boehm/
-│   │   ├── Main.kt                  # Entry point: stdio read loop
+│   │   ├── Main.kt                  # Entry point: stdio + catalog loader
 │   │   ├── auth/
 │   │   │   └── AuthHandler.kt       # Bearer token validation
+│   │   ├── catalog/
+│   │   │   ├── CatalogModels.kt     # Catalog YAML data classes
+│   │   │   ├── CatalogLoader.kt     # Parse catalog.yaml
+│   │   │   └── CatalogAdapter.kt    # Generic PerfToolAdapter
 │   │   ├── core/
 │   │   │   ├── McpHandler.kt        # JSON-RPC message dispatcher
 │   │   │   ├── Orchestrator.kt      # Test plan routing, run lifecycle
@@ -287,17 +308,14 @@ Boehm/
 │   │   ├── model/
 │   │   │   ├── TestPlan.kt          # Input: how to run a test
 │   │   │   ├── RunResult.kt         # Output: normalized result + summary
-│   │   │   ├── ProgressEvent.kt     # Live progress during execution
-│   │   │   ├── ValidationError.kt   # Field-level validation
-│   │   │   └── TestType.kt          # Enum: HTTP, DATABASE, CUSTOM
+│   │   │   └── ProgressEvent.kt     # Progress, events, enums
 │   │   └── adapters/
 │   │       ├── PerfToolAdapter.kt   # Interface all adapters implement
 │   │       └── tulip/
-│   │           ├── TulipAdapter.kt  # Config generation + CLI exec
 │   │           └── TulipParser.kt   # Parse Tulip JSON → RunResult
 │   └── test/kotlin/io/boehm/
 │       ├── adapter/
-│       │   ├── TulipAdapterTest.kt
+│       │   ├── TulipAdapterTest.kt  # Tests CatalogAdapter via tulip profile
 │       │   └── TulipParserTest.kt
 │       ├── auth/
 │       │   └── AuthHandlerTest.kt
@@ -306,6 +324,8 @@ Boehm/
 │       │   ├── OrchestratorTest.kt
 │       │   ├── SchedulerTest.kt
 │       │   └── StoreTest.kt
+│       ├── model/
+│       │   └── RunResultTest.kt
 │       ├── fixtures/
 │       │   ├── mock-tulip.sh
 │       │   ├── run-real-tulip.sh

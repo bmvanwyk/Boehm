@@ -29,16 +29,23 @@ Named after [Barry Boehm](https://en.wikipedia.org/wiki/Barry_Boehm).
 
 ```
 Boehm/
-├── build.gradle.kts              # Kotlin/JVM, Gson, SQLite, JUnit 5
-├── catalog.yaml                   # Test profiles for every tool
+├── build.gradle.kts              # Kotlin/JVM, Gson, SQLite, SnakeYAML
+├── catalog.yaml                   # Tool index: profiles, overrides, parsers
 ├── profiles/
-│   └── tulip/
-│       ├── http-get.jsonc         # Static config template (checked in)
-│       └── demo.jsonc
+│   ├── tulip/
+│   │   ├── http-get.jsonc         # Tulip config template (JSON with overrides)
+│   │   └── demo.jsonc
+│   ├── k6/http-get.js             # k6 script template (env vars)
+│   ├── jmeter/http-get.jmx        # JMeter plan template (properties)
+│   └── gatling/http-get.scala     # Gatling simulation template (system props)
 ├── src/
 │   ├── main/kotlin/io/boehm/
-│   │   ├── Main.kt                # stdio entry point
+│   │   ├── Main.kt                # stdio entry point, catalog loader
 │   │   ├── auth/AuthHandler.kt    # SHA-256 bearer token
+│   │   ├── catalog/
+│   │   │   ├── CatalogModels.kt   # Data classes for catalog.yaml
+│   │   │   ├── CatalogLoader.kt   # Parse catalog.yaml → typed models
+│   │   │   └── CatalogAdapter.kt  # Generic PerfToolAdapter (catalog-driven)
 │   │   ├── core/
 │   │   │   ├── McpHandler.kt      # JSON-RPC dispatcher (5 tools)
 │   │   │   ├── Orchestrator.kt    # Route test plans → adapters
@@ -46,10 +53,10 @@ Boehm/
 │   │   │   └── Store.kt           # SQLite (adapters, runs, schemas)
 │   │   ├── model/                 # TestPlan, RunResult, Summary, Latency
 │   │   └── adapters/tulip/
-│   │       ├── TulipAdapter.kt    # Config template → overrides → exec → parse
 │   │       └── TulipParser.kt     # Native Tulip JSON → RunResult
 │   └── test/
-│       ├── adapter/               # TulipAdapterTest, TulipParserTest
+│       ├── adapter/               # TulipAdapterTest (via CatalogAdapter)
+│       ├── parser/                # TulipParserTest
 │       ├── auth/                  # AuthHandlerTest
 │       ├── core/                  # McpHandler, Orchestrator, Scheduler, Store
 │       ├── fixtures/
@@ -66,7 +73,7 @@ The `.opencode/opencode.jsonc` config registers Boehm as an MCP server. Restart 
 
 ```
 use boehm to list adapters
-use boehm to queue a test named demo with tool tulip against https://httpbin.org/get at 50 req/s for 30s
+use boehm to queue a test named demo with tool tulip profile http-get against https://httpbin.org/get at 50 req/s for 30s
 use boehm to check server status
 use boehm to get the result for run <runId>
 ```
@@ -75,20 +82,20 @@ use boehm to get the result for run <runId>
 
 | Tool | Input | Output |
 |------|-------|--------|
-| `list_adapters` | — | Available tools + supported test types |
-| `run_test` | `tool`, `test_name`, `test_plan` | `runId`, status `queued` |
+| `list_adapters` | — | Available tools + supported profiles |
+| `run_test` | `tool`, `test_name`, `test_plan` (contains `type`, `profile`, `target_url`, `rate_per_sec`, `duration_sec`, `warmup_sec`, plus tool-specific params) | `runId`, status `queued` |
 | `get_run` | `run_id` | Full `RunResult` with latency, throughput, error rate |
-| `server_status` | — | Queue depth, current run, uptime |
-| `get_run_progress` | `run_id` | Live `progress_pct`, `current_stage`, `rolling_summary` |
+| `server_status` | — | Queue depth, currently running, uptime, registered adapters |
+| `get_run_progress` | `run_id` | Status, `progress_pct`, `current_stage`, `rolling_summary` |
 
 ## How it works
 
 1. An agent sends `run_test` with a tool name, profile, and parameter overrides
-2. Boehm loads the profile template from `profiles/<tool>/`, applies overrides
-3. The scheduler queues the run (serial execution — one at a time, clean measurements)
-4. The adapter shell-execs the tool CLI, captures output
+2. `McpHandler` parses the request and constructs a `TestPlan` with common fields + tool-specific `parameters`
+3. `Orchestrator` validates the plan and queues the run in SQLite (serial execution — one at a time for clean measurements)
+4. `CatalogAdapter` loads the profile template from `profiles/<tool>/`, applies overrides via JSON path (JSON-based tools) or env vars (script-based tools), shell-execs the CLI command, and captures output
 5. Results are parsed into a normalized `RunResult` and persisted in SQLite
-6. The agent polls `get_run` or `get_run_progress` for the result
+6. The agent polls `get_run` or `get_run_progress` until complete
 
 ## Test catalog
 

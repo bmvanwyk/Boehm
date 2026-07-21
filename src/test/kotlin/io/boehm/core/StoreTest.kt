@@ -23,6 +23,7 @@ class StoreTest {
 
     @Test
     fun `schema initializes and tables exist`() {
+        assertTrue(store.listAdapters().isEmpty())
     }
 
     @Test

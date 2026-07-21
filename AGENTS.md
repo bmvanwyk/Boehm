@@ -25,39 +25,40 @@ Read the design spec before changing behaviour.
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  Performance Testing AI Engineer                         │
-│                                                          │
-│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐ │
-│  │  Agent       │  │  Skills      │  │  MCP Server     │ │
-│  │  (Claude     │  │  (method-    │  │  (instruments)  │ │
-│  │   Code, etc) │  │   ology)     │  │                 │ │
-│  └──────┬───────┘  └──────────────┘  └────────┬────────┘ │
-│         │                                      │          │
-│  ┌──────▼──────────────────────────────────────▼────────┐ │
-│  │  SQLite Database + Run Scheduler                     │ │
-│  │  → runs, baselines, orchestration state              │ │
-│  │  → serialized execution for clean measurements       │ │
-│  │  → git integration for PR investigation              │ │
-│  └─────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Boehm MCP Server                                             │
+│                                                               │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────────┐ │
+│  │  Agent       │  │  JSON-RPC    │  │  Catalog + Profiles  │ │
+│  │  (opencode,  │──│  McpHandler  │──│  catalog.yaml        │ │
+│  │   etc)       │  │  AuthHandler │  │  profiles/<tool>/*   │ │
+│  └──────────────┘  └──────┬───────┘  └──────────┬───────────┘ │
+│                           │                      │            │
+│                    ┌──────▼──────────────────────▼──────────┐  │
+│                    │  Orchestrator + Scheduler                │  │
+│                    │  → serial run queue                     │  │
+│                    │  → CatalogAdapter (generic CLI exec)    │  │
+│                    │  → SQLite persist (Store)               │  │
+│                    └─────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Rules
 
-1. **Adapter contract** — every tool adapter implements `PerfToolAdapter` interface producing normalized `RunResult`. Adapters SHOULD support live progress reporting via `runWithProgress`.
-2. **Skill-driven methodology** — engineering knowledge lives in opencode skill files, not in the MCP server.
-3. **Everything preserved** — every run stored; any run can be tagged as a baseline.
-4. **Investigation-first** — git integration identifies which commit and code change caused a regression.
+1. **Catalog-driven** — all tools and profiles defined in `catalog.yaml`. No hardcoded adapters. `CatalogAdapter` is the single generic implementation driven by catalog data.
+2. **JSON configs vs script configs** — `.json`/`.jsonc` templates get overrides applied via JSON path. `.js`/`.jmx`/`.scala` templates are copied as-is with overrides passed via env vars or CLI flags (`-e`, `-J`, `-D`).
+3. **Skill-driven methodology** — engineering knowledge lives in opencode skill files, not in the MCP server.
+4. **Everything preserved** — every run stored; any run can be tagged as a baseline.
 5. **Run isolation** — scheduler serializes all test execution to prevent overlapping runs from adding noise.
 6. **Local-first** — no cloud dependencies; SQLite single-file database.
-7. **All adapters equal** — every tool is invoked via CLI shell exec. No in-process coupling. The CLI output format is the stable contract.
+7. **All adapters equal** — every tool is invoked via CLI shell exec (`bash -c`). No in-process coupling. The CLI output format is the stable contract.
 
 ## Build and Run
 
 ```bash
 ./gradlew build          # Compile + test
 ./gradlew test           # Run tests
+./gradlew run --args="--token=<your-token>"   # Start MCP server
 ```
 
 ## Design Status
