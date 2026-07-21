@@ -1,0 +1,133 @@
+# Boehm test catalog
+#
+# Each profile defines an executable test scenario. The `tool` field maps to
+# a Boehm adapter. The `bash` field shows the raw CLI invocation for manual
+# debugging or CI. Extend by adding new profiles for other tools.
+#
+# Run a profile directly:
+#   TARGET_URL=https://example.com RATE=100 DURATION=60 bash -c "$(yq '.profiles[] | select(.name == "httpbin-get") | .bash' catalog.yaml)"
+#
+version: 1
+
+profiles:
+  - name: httpbin-get
+    tool: tulip
+    description: >
+      HTTP GET benchmark using Tulip's TestHttpUser.action3 against a target URL.
+      The user action hits paths like /posts/{id} relative to the base URL.
+    params:
+      target_url:
+        default: "https://httpbin.org/get"
+        description: "Target URL (used as RestClient base URL)"
+      rate_per_sec:
+        default: 50
+        description: "Target throughput in requests per second"
+      duration_sec:
+        default: 30
+        description: "Benchmark duration in seconds"
+      warmup_sec:
+        default: 5
+        description: "Warmup phase in seconds"
+    bash: |
+      OUTPUT_FILE=$(mktemp /tmp/boehm-output-XXXXXX.json)
+      CONFIG_FILE=$(mktemp /tmp/boehm-config-XXXXXX.json)
+
+      python3 -c "
+      import json
+      cfg = {
+        'actions': {
+          'output_filename': '$OUTPUT_FILE',
+          'report_filename': '',
+          'user_class': 'org.example.user.TestHttpUser',
+          'user_params': {'url': '${TARGET_URL:-https://httpbin.org/get}'},
+          'user_actions': {'0': 'onStart', '3': 'GET', '100': 'onStop'}
+        },
+        'contexts': {
+          'default': {
+            'enabled': True,
+            'num_users': max(int(${RATE:-50}) // 10, 1),
+            'num_threads': max(int(${RATE:-50}) // 50, 1)
+          }
+        },
+        'benchmarks': {
+          'boehm-benchmark': {
+            'aps_rate': float(${RATE:-50}),
+            'warmup_duration1': int(${WARMUP:-5}),
+            'warmup_duration2': 0,
+            'benchmark_duration': int(${DURATION:-30}),
+            'benchmark_iterations': 1,
+            'scenario_actions': [{'id': 3, 'weight': 0}]
+          }
+        }
+      }
+      with open('$CONFIG_FILE', 'w') as f:
+          json.dump(cfg, f, indent=2)
+      "
+
+      cd /home/bvwyk/git/Tulip
+      ./gradlew -q :tulip-main:run --args="--config $CONFIG_FILE"
+
+      echo "=== Output ==="
+      cat "$OUTPUT_FILE"
+
+      rm -f "$CONFIG_FILE" "$OUTPUT_FILE"
+
+  - name: tulip-demo
+    tool: tulip
+    description: >
+      Tulip demo benchmark using DemoUser with delay actions (no HTTP calls).
+      Useful for validating Tulip overhead in isolation.
+    params:
+      rate_per_sec:
+        default: 1000
+        description: "Target throughput"
+      duration_sec:
+        default: 10
+        description: "Benchmark duration"
+    bash: |
+      OUTPUT_FILE=$(mktemp /tmp/boehm-output-XXXXXX.json)
+      CONFIG_FILE=$(mktemp /tmp/boehm-config-XXXXXX.json)
+
+      python3 -c "
+      import json
+      cfg = {
+        'actions': {
+          'output_filename': '$OUTPUT_FILE',
+          'report_filename': '',
+          'user_class': 'org.example.user.DemoUser',
+          'user_params': {'delay1': '0', 'delay2': '0'}
+        },
+        'contexts': {
+          'default': {
+            'enabled': True,
+            'num_users': 10,
+            'num_threads': 2
+          }
+        },
+        'benchmarks': {
+          'boehm-demo': {
+            'aps_rate': float(${RATE:-1000}),
+            'warmup_duration1': 2,
+            'warmup_duration2': 0,
+            'benchmark_duration': int(${DURATION:-10}),
+            'scenario_actions': [{'id': 8, 'weight': 50}, {'id': 9, 'weight': 50}]
+          }
+        }
+      }
+      with open('$CONFIG_FILE', 'w') as f:
+          json.dump(cfg, f, indent=2)
+      "
+
+      cd /home/bvwyk/git/Tulip
+      ./gradlew -q :tulip-main:run --args="--config $CONFIG_FILE"
+
+      echo "=== Output ==="
+      python3 -c "
+      import json
+      with open('$OUTPUT_FILE') as f:
+          d = json.load(f)
+      r = d['results'][0]
+      print(f\"duration={r['duration']}s  requests={r['num_actions']}  failed={r['num_failed']}  throughput={r['avg_aps']}/s\")
+      print(f\"latency_p50={r['percentiles_rt']['50.0']/1e6:.1f}ms  p99={r['percentiles_rt']['99.0']/1e6:.1f}ms\")
+      "
+      rm -f "$CONFIG_FILE" "$OUTPUT_FILE"
