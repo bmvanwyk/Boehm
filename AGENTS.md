@@ -49,7 +49,7 @@ Read the design spec before changing behaviour.
 4. **Investigation-first** — git integration identifies which commit and code change caused a regression.
 5. **Run isolation** — scheduler serializes all test execution to prevent overlapping runs from adding noise.
 6. **Local-first** — no cloud dependencies; SQLite single-file database.
-7. **Extensibility first** — adapter interface designed for any CLI tool.
+7. **All adapters equal** — every tool is invoked via CLI shell exec. No in-process coupling. The CLI output format is the stable contract.
 
 ## Build and Run
 

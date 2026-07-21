@@ -119,7 +119,7 @@ perf-mcp-server (Kotlin/JVM)
 2. Core layer validates the test plan, persists a pending run record in SQLite
 3. Run is enqueued — status `pending` → `queued`
 4. Scheduler picks up the run when executor is free — status `queued` → `running`
-5. Adapter translates test plan to tool-specific invocation (in-process JVM call, shell exec, etc.)
+5. Adapter translates test plan to tool-specific invocation (typically shell exec; all tools are treated equally)
 6. **During execution**, the adapter emits periodic progress events (rolling metrics, stage transitions) back to the core layer, which stores them and makes them available via `get_run_progress`
 7. Adapter parses tool output into normalized `RunResult`
 8. Core layer persists final result in SQLite — status `running` → `completed` (or `failed`)
@@ -827,7 +827,7 @@ Each performance tool produces output in a different format. The adapter layer t
 | **k6** | JSON (`--out json`) | Parse JSON directly — summary object contains all latency percentiles, throughput, error rates | All `RunResult.summary` fields |
 | **JMeter** | JTL/CSV + HTML | Parse JTL CSV for raw timestamps, compute percentiles and throughput server-side. HTML report preserved at `rawOutputPath` | Latency percentiles computed from raw samples; throughput from elapsed time |
 | **Gatling** | `simulation.log` + HTML | Parse `simulation.log` text format. Extract percentiles from GROUP/REQUEST entries | `p50`/`p95`/`p99` from log; `maxMs` from slowest request |
-| **Tulip** | JSON (native output contains all run details) | Parse JSON directly — throughput, latency percentiles, error rate, and HdrHistogram data are all in the output. In-process Kotlin avoids serialization overhead | All fields (native JSON, highest fidelity, same JVM) |
+| **Tulip** | CLI JSON (native output) | Shell exec Tulip CLI, capture JSON stdout. Parse directly — throughput, latency percentiles, error rate, HdrHistogram data all in the output | All fields (rich native JSON output from CLI) |
 | **wrk/wrk2** | Text stdout | Parse threaded summary: `Latency` line for percentiles, `Req/Sec` for throughput | `p50`/`p75`/`p99` from wrk output |
 | **Custom script** | stdout | User-provided parser or match one of the above formats | Depends on parser |
 
@@ -1264,7 +1264,7 @@ strategy:
 |---|---|---|
 | k6 30s HTTP test | ~30s wall clock, ~50 MB RAM | Single VU, 100 RPS |
 | JMeter 60s test | ~60s wall clock, ~200 MB RAM | JVM overhead |
-| Tulip in-process | Varies by test plan | Same JVM as Boehm, minimal overhead |
+| Tulip | ~35s (CLI exec) | Low — single binary, runtime overhead from CLI spawn |
 | Raw output storage | ~100 KB per run | Truncated at 10 MB |
 | SQLite DB growth | ~5 KB per run | Summary-only, excluding raw output |
 | Bisect per commit | 1 extra run per commit tested | Log(N) runs for N commits |
@@ -1416,7 +1416,7 @@ Compare results from different tools running the same test scenario to validate 
 |---|---|---|
 | k6 30s HTTP test (100 RPS) | ~35s (incl. warmup + cooldown) | Low — single binary, no JVM |
 | JMeter 60s test | ~65s | Medium — JVM startup per run |
-| Tulip in-process | ~35s | Low — same JVM as Boehm |
+| Tulip CLI | ~35s | Low — single binary, CLI spawn overhead |
 | `compare_with_baseline` | <100ms | Negligible — SQLite query + arithmetic |
 | `validate_pr` (10 commits, no bisect) | ~2 × run duration | 2 runs (base + head) |
 | `validate_pr` with bisect (10 commits) | ~5 × run duration | Base + head + 3 bisect runs |
@@ -1590,9 +1590,9 @@ This gradual rollout prevents noisy CI from blocking development velocity.
 - Gradle project setup with MCP protocol support (direct JSON-RPC or SDK)
 - Core layer: MCP handler, orchestrator, run recording, SQLite schema
 - Run scheduler with serial execution
-- Tulip adapter (in-process JVM, parses native JSON output)
+- Tulip adapter (shell exec, parses native JSON output)
 - `list_adapters`, `run_test`, `get_run`, `server_status`, `get_run_progress` tools
-- Unit tests + integration test against a target using Tulip
+- Unit tests + integration test against a target using Tulip CLI
 - Fixed: tool-timeout handling, test plan validation
 
 ### Phase 2 — Baseline & Comparison
