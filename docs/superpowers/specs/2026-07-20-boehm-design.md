@@ -816,6 +816,110 @@ Each adapter must document:
 - Known sources of variance (JIT warmup, GC pauses, network jitter)
 - Its container image or pinned binary version for CI reproducibility
 
+## Tool Output Normalization
+
+Each performance tool produces output in a different format. The adapter layer translates all of these into the normalized `RunResult` schema. Raw output is preserved for debugging and tool-specific deep analysis.
+
+### Tool output formats and parsing strategy
+
+| Tool | Native output | Adapter parsing approach | Fields populated |
+|---|---|---|---|
+| **k6** | JSON (`--out json`) | Parse JSON directly — summary object contains all latency percentiles, throughput, error rates | All `RunResult.summary` fields |
+| **JMeter** | JTL/CSV + HTML | Parse JTL CSV for raw timestamps, compute percentiles and throughput server-side. HTML report preserved at `rawOutputPath` | Latency percentiles computed from raw samples; throughput from elapsed time |
+| **Gatling** | `simulation.log` + HTML | Parse `simulation.log` text format. Extract percentiles from GROUP/REQUEST entries | `p50`/`p95`/`p99` from log; `maxMs` from slowest request |
+| **Tulip** | JSON + HdrHistogram | In-process Kotlin — read HdrHistogram for exact percentiles | All fields (highest fidelity, same JVM) |
+| **wrk/wrk2** | Text stdout | Parse threaded summary: `Latency` line for percentiles, `Req/Sec` for throughput | `p50`/`p75`/`p99` from wrk output |
+| **Custom script** | stdout | User-provided parser or match one of the above formats | Depends on parser |
+
+### Normalization pipeline
+
+```
+Tool binary
+   ↓ stdout/stderr
+Raw output file (preserved at rawOutputPath)
+   ↓ Adapter.parseOutput(raw: String) → RawMetrics
+   ↓ Adapter.normalize(rawMetrics: RawMetrics) → RunResult.summary
+   ↓ Core layer persists RunResult to SQLite
+   ↓ metadata populated with tool-specific extras not in normalized schema
+```
+
+**Raw output preservation:**
+- The exact stdout/stderr from the tool is saved to `rawOutputPath` before any parsing
+- File is truncated at 10 MB
+- Used for debugging, tool-native report generation, and manual verification
+- Not required for analysis — all analytics run against the normalized `RunResult`
+
+**Extensible metadata:**
+Tool-specific data that doesn't fit the normalized schema goes into `metadata`:
+
+```json
+{
+  "metadata": {
+    "k6_iterations": 2850,
+    "k6_data_received_bytes": 524000,
+    "k6_data_sent_bytes": 12000,
+    "k6_http_req_duration_avg_ms": 8.5,
+    "tulip_gc_pause_total_ms": 45,
+    "tulip_hdr_max_value": 210,
+    "jmeter_sample_count": 2850,
+    "jmeter_error_count": 0
+  }
+}
+```
+
+This enables tool-specific analysis (e.g., "show me GC pause correlation with p99") while keeping cross-tool comparison on normalized fields.
+
+### Historical tracking via normalized schema
+
+All historical analysis uses the normalized fields in SQLite:
+
+```sql
+-- Trend: p95 over the last 30 days for a test
+SELECT r.created_at, json_extract(r.summary, '$.latency.p95Ms') as p95
+FROM runs r
+JOIN test_scenarios s ON r.scenario_id = s.id
+WHERE s.name = 'http-api-load' AND s.tool = 'k6'
+  AND r.status = 'completed'
+  AND r.created_at >= datetime('now', '-30 days')
+ORDER BY r.created_at;
+
+-- Cross-tool comparison: same test on different tools
+SELECT r.tool, r.created_at,
+       json_extract(r.summary, '$.latency.p50Ms') as p50,
+       json_extract(r.summary, '$.latency.p99Ms') as p99,
+       json_extract(r.summary, '$.throughputReqPerSec') as tput
+FROM runs r
+JOIN test_scenarios s ON r.scenario_id = s.id
+WHERE s.name = 'http-api-load' AND r.status = 'completed'
+ORDER BY r.tool, r.created_at;
+```
+
+The normalized schema is the single source of truth for cross-tool comparison, trend analysis, and baseline comparison. Tool-specific data in `metadata` supplements but never replaces the normalized fields.
+
+### Adapter implementation pattern
+
+```kotlin
+class K6Adapter : PerfToolAdapter {
+    override fun run(testPlan: TestPlan): RunResult {
+        val process = startK6Process(testPlan)
+        val rawOutput = process.captureOutput(rawOutputPath)
+        val summary = parseK6JsonOutput(rawOutput)
+        val metadata = extractK6Metadata(rawOutput)
+
+        return RunResult(
+            tool = "k6",
+            testName = testPlan.testName,
+            timestamp = Instant.now(),
+            runId = uuid,
+            status = if (process.exitCode == 0) "completed" else "failed",
+            summary = summary,
+            rawOutputPath = rawOutputPath,
+            metadata = metadata
+        )
+    }
+}
+```
+
 ## SQLite Database
 
 A single SQLite database at `~/.boehm/boehm.db` stores all persistent state.
