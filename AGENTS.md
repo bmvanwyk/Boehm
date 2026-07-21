@@ -6,6 +6,7 @@
 
 | Document | Purpose |
 |----------|---------|
+| `docs/architecture.md` | System architecture with Mermaid diagrams, component map, data flows, ADRs |
 | `docs/superpowers/specs/2026-07-20-boehm-phase-1.md` | Active Phase 1 spec: MCP tools, adapter interface, schema, acceptance criteria |
 | `docs/superpowers/specs/2026-07-20-boehm-vision.md` | Full product vision (Phases 2-7 reference) |
 
