@@ -1,0 +1,2 @@
+# Enable auto-env with: sdk config auto_env true
+java=21.0.7-tem
