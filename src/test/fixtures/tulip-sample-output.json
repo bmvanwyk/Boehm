@@ -1,19 +1,3 @@
-{
-  "tool": "tulip",
-  "testName": "http-get",
-  "status": "completed",
-  "duration": 30,
-  "totalRequests": 2850,
-  "throughputPerSec": 95.0,
-  "errorRatePct": 0.0,
-  "latencyMs": {
-    "min": 2.1,
-    "p50": 8.5,
-    "p90": 22.3,
-    "p95": 35.0,
-    "p99": 68.1,
-    "max": 210.0
-  },
-  "rawOutputPath": "/tmp/tulip-output.json",
-  "metadata": {}
-}
+{"version":"2.3.4","timestamp":"2026-07-21_10:00:00","java":{"jvm.system.properties":{"java.vendor":"Eclipse Adoptium","java.version":"21.0.7","java.runtime.version":"21.0.7+8-LTS","os.name":"Linux","os.arch":"amd64"},"jvm.runtime.options":["-Xms512m","-Xmx512m"]},"config":{"actions":{"output_filename":"/tmp/boehm-output.json","user_params":{"url":"https://httpbin.org/get"}}},"results":[
+{"context_name":"Context-0","context_id":0,"bm_name":"http-get","bm_id":1,"row_id":0,"num_users":100,"num_threads":8,"queue_length":100,"workflow_name":"","test_begin":"2026-07-21_10:00:00","test_end":"2026-07-21_10:00:30","duration":30.0,"num_actions":2850,"num_failed":0,"avg_aps":95.0,"aps_target_rate":100.0,"avg_rt":8500000.0,"sd_rt":5000000.0,"min_rt":2100000.0,"max_rt":210000000.0,"max_rt_ts":"2026-07-21_10:00:15","percentiles_rt":{"50.0":8500000.0,"75.0":15000000.0,"90.0":22300000.0,"95.0":35000000.0,"99.0":68100000.0},"hdr_histogram_rt":"HIST","user_actions":{}}
+]}

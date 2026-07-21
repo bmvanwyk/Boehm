@@ -59,44 +59,38 @@ graph TB
 ```mermaid
 graph TB
     subgraph "Protocol Layer"
-        McpServer["McpServer.kt<br/>stdio JSON-RPC loop"]
-        RequestRouter["RequestRouter.kt<br/>dispatch tools"]
-        AuthGuard["AuthGuard.kt<br/>validate token per session"]
+        McpHandler["McpHandler.kt<br/>stdio JSON-RPC loop + dispatch"]
+        AuthHandler["AuthHandler.kt<br/>validate token per session"]
     end
 
     subgraph "Application Layer"
-        RunService["RunService.kt<br/>create/read/update runs"]
+        Orchestrator["Orchestrator.kt<br/>route test plans, manage runs"]
         Scheduler["Scheduler.kt<br/>serial queue + worker"]
-        RunStore["RunStore.kt<br/>SQLite + migrations"]
-        ProgressStore["ProgressStore.kt<br/>latest progress snapshot"]
+        Store["Store.kt<br/>SQLite CRUD"]
     end
 
     subgraph "Adapter Layer"
         AdapterInterface["PerfToolAdapter"]
-        TulipAdapter["TulipAdapter.kt"]
-        TulipParser["TulipParser.kt"]
-        ProcessRunner["ProcessRunner.kt<br/>timeout + output capture"]
+        TulipAdapter["TulipAdapter.kt<br/>config generation + CLI exec"]
+        TulipParser["TulipParser.kt<br/>native JSON → RunResult"]
     end
 
     subgraph "Model"
-        Models["TestPlan, RunResult, ProgressSnapshot"]
+        Models["TestPlan, RunResult, ProgressEvent, Summary, Latency"]
     end
 
     Agent["AI Agent"]
 
-    Agent --> McpServer
-    McpServer --> AuthGuard
-    McpServer --> RequestRouter
-    RequestRouter --> RunService
-    RunService --> Scheduler
-    RunService --> RunStore
-    RunService --> ProgressStore
+    Agent --> McpHandler
+    McpHandler --> AuthHandler
+    McpHandler --> Orchestrator
+    Orchestrator --> Scheduler
+    Orchestrator --> Store
     Scheduler --> TulipAdapter
-    TulipAdapter --> ProcessRunner
     TulipAdapter --> TulipParser
     TulipAdapter --> Models
     TulipParser --> Models
-    RunStore --> SQLite[(SQLite)]
+    Store --> SQLite[(SQLite)]
 ```
 
 ---
@@ -224,7 +218,7 @@ interface PerfToolAdapter {
 
 Where `ProgressSink` is a minimal callback for emitting progress snapshots while the tool is running. The adapter is responsible for:
 
-- constructing the subprocess command
+- constructing the subprocess command (and any required config files — e.g., the Tulip adapter generates a temporary JSON config mapped from the `TestPlan` and passes it via `--config <file>`)
 - capturing stdout/stderr
 - writing raw output to disk atomically
 - parsing the tool output into a normalized `RunResult`
@@ -282,27 +276,40 @@ Boehm/
 ├── settings.gradle.kts
 ├── src/
 │   ├── main/kotlin/io/boehm/
-│   │   ├── Main.kt                  # stdio JSON-RPC loop
+│   │   ├── Main.kt                  # Entry point: stdio read loop
 │   │   ├── auth/
-│   │   │   └── AuthGuard.kt         # bearer token validation
+│   │   │   └── AuthHandler.kt       # Bearer token validation
 │   │   ├── core/
-│   │   │   ├── McpServer.kt         # request dispatch
-│   │   │   ├── RunService.kt        # run lifecycle and state updates
-│   │   │   ├── Scheduler.kt         # serial queue + worker
-│   │   │   └── RunStore.kt          # SQLite access and migrations
+│   │   │   ├── McpHandler.kt        # JSON-RPC message dispatcher
+│   │   │   ├── Orchestrator.kt      # Test plan routing, run lifecycle
+│   │   │   ├── Scheduler.kt         # Serial run queue
+│   │   │   └── Store.kt             # SQLite operations
 │   │   ├── model/
-│   │   │   ├── TestPlan.kt
-│   │   │   ├── RunResult.kt
-│   │   │   └── ProgressSnapshot.kt
+│   │   │   ├── TestPlan.kt          # Input: how to run a test
+│   │   │   ├── RunResult.kt         # Output: normalized result + summary
+│   │   │   ├── ProgressEvent.kt     # Live progress during execution
+│   │   │   ├── ValidationError.kt   # Field-level validation
+│   │   │   └── TestType.kt          # Enum: HTTP, DATABASE, CUSTOM
 │   │   └── adapters/
-│   │       ├── PerfToolAdapter.kt
+│   │       ├── PerfToolAdapter.kt   # Interface all adapters implement
 │   │       └── tulip/
-│   │           ├── TulipAdapter.kt
-│   │           ├── TulipParser.kt
-│   │           └── ProcessRunner.kt
+│   │           ├── TulipAdapter.kt  # Config generation + CLI exec
+│   │           └── TulipParser.kt   # Parse Tulip JSON → RunResult
 │   └── test/kotlin/io/boehm/
 │       ├── adapter/
-│       │   └── TulipAdapterTest.kt
+│       │   ├── TulipAdapterTest.kt
+│       │   └── TulipParserTest.kt
+│       ├── auth/
+│       │   └── AuthHandlerTest.kt
+│       ├── core/
+│       │   ├── McpHandlerTest.kt
+│       │   ├── OrchestratorTest.kt
+│       │   ├── SchedulerTest.kt
+│       │   └── StoreTest.kt
+│       ├── fixtures/
+│       │   ├── mock-tulip.sh
+│       │   ├── run-real-tulip.sh
+│       │   └── tulip-sample-output.json
 │       └── integration/
 │           └── TulipIntegrationTest.kt
 ```

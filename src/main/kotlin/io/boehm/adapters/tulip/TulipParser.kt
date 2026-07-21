@@ -1,5 +1,6 @@
 package io.boehm.adapters.tulip
 
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.boehm.model.Latency
@@ -9,47 +10,59 @@ import java.time.Instant
 import java.util.UUID
 
 object TulipParser {
+    private const val NS_TO_MS = 1_000_000.0
+
     fun parse(rawJson: String): RunResult {
         val root = JsonParser.parseString(rawJson).asJsonObject
 
-        if (!root.has("latencyMs")) {
-            throw IllegalArgumentException("Missing required field: latencyMs")
-        }
-        val latencyObj = root.getAsJsonObject("latencyMs")
-        val latency = Latency(
-            minMs = latencyObj.get("min").asDouble,
-            p50Ms = latencyObj.get("p50").asDouble,
-            p90Ms = latencyObj.get("p90").asDouble,
-            p95Ms = latencyObj.get("p95").asDouble,
-            p99Ms = latencyObj.get("p99").asDouble,
-            maxMs = latencyObj.get("max").asDouble
-        )
+        val results: JsonArray = root.getAsJsonArray("results")
+            ?: throw IllegalArgumentException("Missing required field: results")
 
-        if (!root.has("duration")) {
+        if (results.size() == 0) {
+            throw IllegalArgumentException("results array is empty")
+        }
+
+        val first = results.get(0).asJsonObject
+
+        if (!first.has("duration")) {
             throw IllegalArgumentException("Missing required field: duration")
         }
+
+        val durationSec = first.get("duration").asInt
+        val numActions = first.get("num_actions")?.asInt ?: 0
+        val numFailed = first.get("num_failed")?.asInt ?: 0
+        val errorRatePct = if (numActions > 0) (numFailed.toDouble() / numActions) * 100.0 else 0.0
+
+        val latency = parseLatency(first)
+
         val summary = Summary(
-            durationSec = root.get("duration").asInt,
-            totalRequests = root.get("totalRequests").asInt,
-            throughputReqPerSec = root.get("throughputPerSec").asDouble,
-            errorRatePct = root.get("errorRatePct").asDouble,
+            durationSec = durationSec,
+            totalRequests = numActions,
+            throughputReqPerSec = first.get("avg_aps")?.asDouble ?: 0.0,
+            errorRatePct = errorRatePct,
             latency = latency
         )
 
-        val metadata = if (root.has("metadata") && !root.get("metadata").isJsonNull) {
-            root.getAsJsonObject("metadata").entrySet().associate {
-                it.key to extractValue(it.value)
-            }
-        } else emptyMap()
+        val metadata = mutableMapOf<String, Any>()
+        if (first.has("bm_name")) metadata["benchmark"] = first.get("bm_name").asString
+        if (first.has("row_id")) metadata["row"] = first.get("row_id").asInt
+        if (first.has("context_name")) metadata["context"] = first.get("context_name").asString
+        if (first.has("sd_rt")) metadata["sd_rt_ns"] = first.get("sd_rt").asDouble
+        if (first.has("avg_rt")) metadata["avg_rt_ns"] = first.get("avg_rt").asDouble
+        if (first.has("num_threads")) metadata["threads"] = first.get("num_threads").asInt
+        if (first.has("num_users")) metadata["users"] = first.get("num_users").asInt
+        if (root.has("timestamp")) metadata["test_timestamp"] = root.get("timestamp").asString
+        if (root.has("version")) metadata["tulip_version"] = root.get("version").asString
+        if (first.has("hdr_histogram_rt")) metadata["hdr_histogram"] = first.get("hdr_histogram_rt").asString
 
         return RunResult(
             tool = "tulip",
-            testName = root.get("testName")?.asString ?: "unknown",
+            testName = first.get("bm_name")?.asString ?: "unknown",
             timestamp = Instant.now().toString(),
             runId = UUID.randomUUID().toString(),
-            status = root.get("status")?.asString ?: "completed",
+            status = "completed",
             summary = summary,
-            rawOutputPath = root.get("rawOutputPath")?.asString,
+            rawOutputPath = null,
             metadata = metadata
         )
     }
@@ -61,6 +74,26 @@ object TulipParser {
                 obj.entrySet().associate { it.key to extractValue(it.value) }
             } else null
         } catch (_: Exception) { null }
+    }
+
+    private fun parseLatency(result: JsonObject): Latency {
+        val percentiles = result.getAsJsonObject("percentiles_rt")
+        val p50 = if (percentiles != null && percentiles.has("50.0")) percentiles.get("50.0").asDouble / NS_TO_MS else 0.0
+        val p90 = if (percentiles != null && percentiles.has("90.0")) percentiles.get("90.0").asDouble / NS_TO_MS else 0.0
+        val p95 = if (percentiles != null && percentiles.has("95.0")) percentiles.get("95.0").asDouble / NS_TO_MS else 0.0
+        val p99 = if (percentiles != null && percentiles.has("99.0")) percentiles.get("99.0").asDouble / NS_TO_MS else 0.0
+
+        val minRt = if (result.has("min_rt")) result.get("min_rt").asDouble / NS_TO_MS else 0.0
+        val maxRt = if (result.has("max_rt")) result.get("max_rt").asDouble / NS_TO_MS else 0.0
+
+        return Latency(
+            minMs = minRt,
+            p50Ms = p50,
+            p90Ms = p90,
+            p95Ms = p95,
+            p99Ms = p99,
+            maxMs = maxRt
+        )
     }
 
     private fun extractValue(element: com.google.gson.JsonElement): Any {

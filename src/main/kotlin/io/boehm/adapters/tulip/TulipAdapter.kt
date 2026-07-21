@@ -1,8 +1,11 @@
 package io.boehm.adapters.tulip
 
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonParser
 import io.boehm.adapters.PerfToolAdapter
 import io.boehm.model.*
 import java.io.File
+import java.nio.file.Files
 import java.time.Instant
 import java.util.UUID
 
@@ -33,14 +36,15 @@ class TulipAdapter(
         outputDir.mkdirs()
         val outputFile = File(outputDir, "${Instant.now().toString().replace(":", "-")}.json")
 
+        val tmpDir = Files.createTempDirectory("boehm-tulip-").toFile()
+        val configFile = File(tmpDir, "config.jsonc")
+
+        val configJson = buildConfigJson(testPlan, outputFile.absolutePath)
+        configFile.writeText(configJson)
+
         val process = ProcessBuilder(
             tulipCommand,
-            "--type", testPlan.type,
-            "--target", testPlan.targetUrl,
-            "--rate", testPlan.ratePerSec.toString(),
-            "--duration", testPlan.durationSec.toString(),
-            "--warmup", testPlan.warmupSec.toString(),
-            "--output", outputFile.absolutePath
+            "--config", configFile.absolutePath
         )
             .redirectErrorStream(true)
             .start()
@@ -48,20 +52,13 @@ class TulipAdapter(
         val stdout = process.inputStream.bufferedReader().readText()
         val exitCode = process.waitFor()
 
-        if (exitCode != 0) {
-            return RunResult(
-                tool = name,
-                testName = testPlan.type,
-                timestamp = Instant.now().toString(),
-                runId = UUID.randomUUID().toString(),
-                status = "failed",
-                summary = null,
-                rawOutputPath = outputFile.absolutePath,
-                metadata = mapOf("exitCode" to exitCode, "stderr" to stdout.take(1000))
-            )
-        }
+        configFile.delete()
+        tmpDir.delete()
 
+        // Try to read output file regardless of exit code
+        // (Tulip may produce valid output even if report generation fails after)
         val rawJson = if (outputFile.exists()) outputFile.readText() else stdout
+
         return try {
             TulipParser.parse(rawJson).copy(rawOutputPath = outputFile.absolutePath)
         } catch (e: Exception) {
@@ -72,9 +69,58 @@ class TulipAdapter(
                 runId = UUID.randomUUID().toString(),
                 status = "failed",
                 summary = null,
-                rawOutputPath = outputFile.absolutePath,
-                metadata = mapOf("parseError" to (e.message ?: "unknown"))
+                rawOutputPath = if (outputFile.exists()) outputFile.absolutePath else null,
+                metadata = mapOf(
+                    "parseError" to (e.message ?: "unknown"),
+                    "exitCode" to exitCode,
+                    "stdout" to stdout.take(500)
+                )
             )
         }
+    }
+
+    internal fun buildConfigJson(testPlan: TestPlan, outputPath: String): String {
+        val config = mapOf(
+            "actions" to mapOf(
+                "output_filename" to outputPath,
+                "report_filename" to "",
+                "user_class" to "org.example.user.TestHttpUser",
+                "user_params" to mapOf(
+                    "url" to testPlan.targetUrl
+                ),
+                "user_actions" to mapOf(
+                    "0" to "onStart",
+                    "3" to "GET",
+                    "100" to "onStop"
+                )
+            ),
+            "contexts" to mapOf(
+                "default" to mapOf(
+                    "enabled" to true,
+                    "num_users" to maxOf(testPlan.ratePerSec.toInt() / 10, 1),
+                    "num_threads" to maxOf(testPlan.ratePerSec.toInt() / 50, 1)
+                )
+            ),
+            "benchmarks" to mapOf(
+                "boehm-benchmark" to mapOf(
+                    "enabled" to true,
+                    "aps_rate" to testPlan.ratePerSec.toDouble(),
+                    "warmup_duration1" to testPlan.warmupSec.toLong(),
+                    "warmup_duration2" to 0L,
+                    "benchmark_duration" to testPlan.durationSec.toLong(),
+                    "benchmark_iterations" to 1,
+                    "scenario_actions" to listOf(
+                        mapOf(
+                            "id" to 3,
+                            "weight" to 0
+                        )
+                    )
+                )
+            )
+        )
+
+        return JsonParser.parseString(
+            GsonBuilder().setPrettyPrinting().create().toJson(config)
+        ).asJsonObject.toString()
     }
 }

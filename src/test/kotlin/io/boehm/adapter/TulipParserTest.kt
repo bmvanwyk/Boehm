@@ -15,14 +15,19 @@ class TulipParserTest {
         assertEquals("completed", result.status)
         assertNotNull(result.summary)
         assertEquals(30, result.summary!!.durationSec)
-        assertTrue(result.summary!!.totalRequests > 0)
-        assertTrue(result.summary!!.throughputReqPerSec > 0)
-        assertTrue(result.summary!!.latency.p50Ms > 0)
-        assertTrue(result.summary!!.latency.p99Ms > 0)
+        assertEquals(2850, result.summary!!.totalRequests)
+        assertEquals(95.0, result.summary!!.throughputReqPerSec, 0.001)
+        assertEquals(0.0, result.summary!!.errorRatePct, 0.001)
+        assertEquals(2.1, result.summary!!.latency.minMs, 0.001)
+        assertEquals(8.5, result.summary!!.latency.p50Ms, 0.001)
+        assertEquals(22.3, result.summary!!.latency.p90Ms, 0.001)
+        assertEquals(35.0, result.summary!!.latency.p95Ms, 0.001)
+        assertEquals(68.1, result.summary!!.latency.p99Ms, 0.001)
+        assertEquals(210.0, result.summary!!.latency.maxMs, 0.001)
     }
 
     @Test
-    fun `parse with missing fields throws`() {
+    fun `parse with missing results array throws`() {
         assertThrows(Exception::class.java) {
             TulipParser.parse("{}")
         }
