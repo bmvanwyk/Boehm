@@ -2,7 +2,11 @@
 #
 # Every tool Boehm supports is listed here with its run profiles.
 # Each profile points to a static config template (checked into profiles/<tool>/)
-# and lists which parameters can be overridden at runtime.
+# and declares which parameters can be overridden at runtime.
+#
+# The `output` field tells Boehm where to find the tool's results after execution.
+#   - For Tulip: output path is embedded in the config JSON (actions.output_filename)
+#   - For k6/JMeter: output path is passed via CLI arg template ({{output_file}})
 #
 # Consistency of measurement: the same template file is used every run,
 # so test structure never drifts. Only the declared override params vary.
@@ -24,6 +28,10 @@ tools:
           HTTP GET via TestHttpUser.action3 against a target base URL.
           Issues GET /posts/{id} requests through Spring RestClient.
         config: profiles/tulip/http-get.jsonc
+        output:
+          path: "{{config.actions.output_filename}}"  # read from config JSON after overrides applied
+          format: json
+          schema: tulip-results   # maps to TulipParser
         overrides:
           target_url:
             path: "actions.user_params.url"
@@ -41,6 +49,10 @@ tools:
       demo:
         description: "CPU-only via DemoUser (delay/noop actions, no HTTP)"
         config: profiles/tulip/demo.jsonc
+        output:
+          path: "{{config.actions.output_filename}}"
+          format: json
+          schema: tulip-results
         overrides:
           rate_per_sec:
             path: "benchmarks.boehm-demo.aps_rate"
@@ -59,12 +71,19 @@ tools:
       http-get:
         description: "Simple HTTP GET with configurable rate and duration"
         config: profiles/k6/http-get.js
+        output:
+          path: "{{output_file}}"  # set by adapter via command template
+          format: jsonl  # k6 outputs newline-delimited JSON
+          schema: k6-jsonl
         overrides:
           target_url:
+            path: "script.env.TARGET_URL"
             default: "https://httpbin.org/get"
           rate_per_sec:
+            path: "script.options.scenarios.main.rate"
             default: 50
           duration_sec:
+            path: "script.options.scenarios.main.duration"
             default: 30
 
   # ── JMeter ────────────────────────────────────────────────────────────
@@ -77,12 +96,19 @@ tools:
       http-get:
         description: "HTTP GET via JMeter Thread Group"
         config: profiles/jmeter/http-get.jmx
+        output:
+          path: "{{results_file}}"
+          format: csv  # JMeter JTL is CSV by default
+          schema: jmeter-csv
         overrides:
           target_url:
+            path: "jmx.arguments.url"
             default: "https://httpbin.org/get"
           threads:
+            path: "jmx.threadGroup.numThreads"
             default: 10
           duration_sec:
+            path: "jmx.threadGroup.duration"
             default: 30
 
   # ── Gatling ───────────────────────────────────────────────────────────
@@ -95,6 +121,10 @@ tools:
       http-get:
         description: "HTTP GET via Gatling simulation"
         config: profiles/gatling/http-get.scala
+        output:
+          path: "{{output_dir}}/js/global_stats.json"  # Gatling writes a stats JSON
+          format: json
+          schema: gatling-stats
         overrides:
           target_url:
             default: "https://httpbin.org/get"
@@ -108,10 +138,17 @@ tools:
     description: "HTTP load testing by Uber (Go, single binary)"
     install: "brew install vegeta"
     run:
-      command: "echo 'GET {{target_url}}' | vegeta attack -rate={{rate}} -duration={{duration}}s -output={{output_file}} && vegeta report --type=json {{output_file}}"
+      command: >
+        echo 'GET {{target_url}}'
+        | vegeta attack -rate={{rate}} -duration={{duration}}s -output={{output_file}}
+        && vegeta report --type=json {{output_file}}
     profiles:
       http-get:
         description: "HTTP GET at constant rate"
+        output:
+          path: "{{output_file}}"
+          format: json
+          schema: vegeta-report
         overrides:
           target_url:
             default: "https://httpbin.org/get"
@@ -129,6 +166,10 @@ tools:
     profiles:
       http-get:
         description: "HTTP GET with fixed concurrency"
+        output:
+          path: "stdout"  # wrk writes results to stdout
+          format: text
+          schema: wrk-text
         overrides:
           target_url:
             default: "https://httpbin.org/get"
