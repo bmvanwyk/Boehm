@@ -104,4 +104,32 @@ class TulipAdapterTest {
         val errors = adapter.validate(plan)
         assertTrue(errors.isEmpty())
     }
+
+    @Test
+    fun `validate rejects unknown profile`() {
+        val toolDef = ToolDef(
+            name = "tulip", description = "", install = null,
+            run = RunDef(command = ""),
+            profiles = mapOf("http-get" to ProfileDef("http-get", null, null,
+                OutputDef("", "", ""), emptyMap()))
+        )
+        val adapter = CatalogAdapter(toolDef, "bad-profile", baseDir)
+        val errors = adapter.validate(TestPlan(type = "http"))
+        assertTrue(errors.any { it.field == "profile" })
+    }
+
+    @Test
+    fun `run with missing config template returns failed`() {
+        val toolDef = ToolDef(
+            name = "tulip", description = "", install = null,
+            run = RunDef(command = "echo test"),
+            profiles = mapOf("http-get" to ProfileDef("http-get", null,
+                config = "profiles/tulip/nonexistent.jsonc",
+                output = OutputDef("", "", ""),
+                overrides = emptyMap()))
+        )
+        val adapter = CatalogAdapter(toolDef, "http-get", baseDir)
+        val result = adapter.run(TestPlan(type = "http"))
+        assertEquals("failed", result.status)
+    }
 }

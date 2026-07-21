@@ -38,4 +38,20 @@ class AuthHandlerTest {
         assertTrue(handler.validateToken("token-1"))
         assertTrue(handler.validateToken("token-2"))
     }
+
+    @Test
+    fun `loadFromConfig adds multiple tokens`() {
+        val handler = AuthHandler()
+        handler.loadFromConfig(listOf("key-1", "key-2"))
+        assertTrue(handler.validateToken("key-1"))
+        assertTrue(handler.validateToken("key-2"))
+        assertFalse(handler.validateToken("key-3"))
+    }
+
+    @Test
+    fun `createToken returns the original token`() {
+        val handler = AuthHandler()
+        val result = handler.createToken("my-token")
+        assertEquals("my-token", result)
+    }
 }

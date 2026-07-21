@@ -1,6 +1,11 @@
 plugins {
     kotlin("jvm") version "1.9.22"
     application
+    jacoco
+}
+
+jacoco {
+    toolVersion = "0.8.11"
 }
 
 group = "io.boehm"
@@ -40,5 +45,14 @@ tasks.test {
         showExceptions = true
         showCauses = true
         showStackTraces = true
+    }
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
     }
 }

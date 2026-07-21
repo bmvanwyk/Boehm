@@ -83,4 +83,39 @@ class StoreTest {
         val runs = store.listRuns(scenarioId)
         assertEquals(2, runs.size)
     }
+
+    @Test
+    fun `getPendingOrRunningRun returns null when empty`() {
+        assertNull(store.getPendingOrRunningRun())
+    }
+
+    @Test
+    fun `getPendingOrRunningRun returns queued run in order`() {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val plan = """{"type":"http","targetUrl":"https://example.com","ratePerSec":100,"durationSec":30}"""
+        val sid = store.insertScenario("tulip", "test-1", plan)!!
+        val rid = store.insertRun(sid, "tulip")!!
+        store.updateRunStatus(rid, "queued")
+
+        val run = store.getPendingOrRunningRun()
+        assertNotNull(run)
+        assertEquals(rid, run!!.id)
+        assertTrue(run.status in listOf("pending", "queued", "running"))
+    }
+
+    @Test
+    fun `getQueuedRuns returns empty when no queued runs`() {
+        assertTrue(store.getQueuedRuns().isEmpty())
+    }
+
+    @Test
+    fun `getScenarioById returns null for missing id`() {
+        assertNull(store.getScenarioById("nonexistent"))
+    }
+
+    @Test
+    fun `close does not throw`() {
+        store.close()
+        assertDoesNotThrow { store.close() }
+    }
 }
