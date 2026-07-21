@@ -193,4 +193,38 @@ class McpHandlerTest {
         )
         assertTrue(response.contains(""""status":"""))
     }
+
+    @Test
+    fun `server_status shows running run when run in progress`() {
+        val store = Store(":memory:")
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val sid = store.insertScenario("tulip", "test", """{"type":"http"}""")!!
+        val rid = store.insertRun(sid, "tulip")!!
+        store.updateRunStatus(rid, "running")
+
+        val h = McpHandler(authHandler, store)
+        h.handle("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"auth_token":"test-token"}}""")
+        val response = h.handle(
+            """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"server_status","arguments":{}}}"""
+        )
+        assertTrue(response.contains(""""status":"running""""), "Expected running status: $response")
+        assertTrue(response.contains("currentlyRunning"), "Expected currentlyRunning: $response")
+    }
+
+    @Test
+    fun `get_run_progress shows progress for running run`() {
+        val store = Store(":memory:")
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val sid = store.insertScenario("tulip", "test", """{"type":"http"}""")!!
+        val rid = store.insertRun(sid, "tulip")!!
+        store.updateRunStatus(rid, "running")
+
+        val h = McpHandler(authHandler, store)
+        h.handle("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"auth_token":"test-token"}}""")
+        val response = h.handle(
+            """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_run_progress","arguments":{"run_id":"$rid"}}}"""
+        )
+        assertTrue(response.contains(""""status":"running""""), "Expected running status: $response")
+        assertTrue(response.contains(""""currentStage":"running""""), "Expected running stage: $response")
+    }
 }
