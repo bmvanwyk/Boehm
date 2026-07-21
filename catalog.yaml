@@ -1,169 +1,101 @@
 # Boehm test catalog
 #
 # Every tool Boehm supports is listed here with its run profiles.
-# Each profile documents:
-#   - what it does
-#   - parameters (with defaults for direct bash use)
-#   - how to run it via bash (debugging, CI, or bypassing Boehm)
+# Each profile points to a static config template (checked into profiles/<tool>/)
+# and lists which parameters can be overridden at runtime.
 #
-# Env vars override defaults:
-#   TARGET_URL=<url>  RATE=<n>  DURATION=<s>  WARMUP=<s>
+# Consistency of measurement: the same template file is used every run,
+# so test structure never drifts. Only the declared override params vary.
 #
 version: 1
 
-# ── Tulip ──────────────────────────────────────────────────────────────
 tools:
+  # ── Tulip ────────────────────────────────────────────────────────────
   tulip:
     description: "JVM micro-benchmarking tool by Anomaly"
     install: |
       git clone https://github.com/anomalyco/Tulip ~/git/Tulip
       cd ~/git/Tulip && ./gradlew build
     run:
-      template: "cd ~/git/Tulip && ./gradlew -q :tulip-main:run --args='--config {{config_file}}'"
+      command: "cd ~/git/Tulip && ./gradlew -q :tulip-main:run --args='--config {{config_file}}'"
     profiles:
       http-get:
         description: >
-          HTTP GET via TestHttpUser.action3.
-          Makes GET /posts/{id} requests against the base URL.
-        params:
+          HTTP GET via TestHttpUser.action3 against a target base URL.
+          Issues GET /posts/{id} requests through Spring RestClient.
+        config: profiles/tulip/http-get.jsonc
+        overrides:
           target_url:
+            path: "actions.user_params.url"
             default: "https://httpbin.org/get"
           rate_per_sec:
+            path: "benchmarks.boehm-benchmark.aps_rate"
             default: 50
-            description: "Target throughput (req/s)"
           duration_sec:
+            path: "benchmarks.boehm-benchmark.benchmark_duration"
             default: 30
-            description: "Benchmark duration (s)"
           warmup_sec:
+            path: "benchmarks.boehm-benchmark.warmup_duration1"
             default: 5
-            description: "Warmup phase (s)"
-        config_template:
-          actions:
-            output_filename: "{{output_file}}"
-            report_filename: ""
-            user_class: "org.example.user.TestHttpUser"
-            user_params:
-              url: "{{target_url}}"
-            user_actions:
-              "0": "onStart"
-              "3": "GET"
-              "100": "onStop"
-          contexts:
-            default:
-              enabled: true
-              num_users: "{{rate_per_sec / 10 | ceil | max(1)}}"
-              num_threads: "{{rate_per_sec / 50 | ceil | max(1)}}"
-          benchmarks:
-            boehm-benchmark:
-              enabled: true
-              aps_rate: "{{rate_per_sec}}"
-              warmup_duration1: "{{warmup_sec}}"
-              warmup_duration2: 0
-              benchmark_duration: "{{duration_sec}}"
-              benchmark_iterations: 1
-              scenario_actions:
-                - id: 3
-                  weight: 0
 
       demo:
         description: "CPU-only via DemoUser (delay/noop actions, no HTTP)"
-        params:
+        config: profiles/tulip/demo.jsonc
+        overrides:
           rate_per_sec:
+            path: "benchmarks.boehm-demo.aps_rate"
             default: 1000
           duration_sec:
+            path: "benchmarks.boehm-demo.benchmark_duration"
             default: 10
-        config_template:
-          actions:
-            output_filename: "{{output_file}}"
-            report_filename: ""
-            user_class: "org.example.user.DemoUser"
-            user_params:
-              delay1: "0"
-              delay2: "0"
-          contexts:
-            default:
-              enabled: true
-              num_users: 10
-              num_threads: 2
-          benchmarks:
-            boehm-demo:
-              enabled: true
-              aps_rate: "{{rate_per_sec}}"
-              warmup_duration1: 2
-              warmup_duration2: 0
-              benchmark_duration: "{{duration_sec}}"
-              scenario_actions:
-                - id: 8
-                  weight: 50
-                - id: 9
-                  weight: 50
 
   # ── k6 ────────────────────────────────────────────────────────────────
   k6:
     description: "Load testing tool by Grafana (JavaScript)"
     install: "brew install k6"
     run:
-      template: "k6 run --out json={{output_file}} {{script_file}}"
+      command: "k6 run --out json={{output_file}} {{script_file}}"
     profiles:
       http-get:
         description: "Simple HTTP GET with configurable rate and duration"
-        params:
+        config: profiles/k6/http-get.js
+        overrides:
           target_url:
             default: "https://httpbin.org/get"
           rate_per_sec:
             default: 50
           duration_sec:
             default: 30
-        script_template: |
-          import http from 'k6/http';
-          import { sleep } from 'k6';
-          export const options = {
-            scenarios: {
-              main: {
-                executor: 'constant-arrival-rate',
-                rate: {{rate_per_sec}},
-                duration: '{{duration_sec}}s',
-                preAllocatedVUs: 10,
-              },
-            },
-          };
-          export default function () {
-            http.get('{{target_url}}');
-            sleep(0);
-          }
 
   # ── JMeter ────────────────────────────────────────────────────────────
   jmeter:
     description: "Apache JMeter (Java, GUI + CLI)"
     install: "brew install jmeter"
     run:
-      template: "jmeter -n -t {{plan_file}} -l {{results_file}} -j {{log_file}}"
+      command: "jmeter -n -t {{plan_file}} -l {{results_file}} -j {{log_file}}"
     profiles:
       http-get:
         description: "HTTP GET via JMeter Thread Group"
-        params:
+        config: profiles/jmeter/http-get.jmx
+        overrides:
           target_url:
             default: "https://httpbin.org/get"
-          rate_per_sec:
-            default: 50
-          duration_sec:
-            default: 30
           threads:
             default: 10
-        plan_generator: |
-          # Generate .jmx plan from template
-          # See: https://jmeter.apache.org/usermanual/jmeter_proxy_step_by_step.html
+          duration_sec:
+            default: 30
 
   # ── Gatling ───────────────────────────────────────────────────────────
   gatling:
     description: "Scala-based load testing by Gatling Corp"
     install: "brew install gatling"
     run:
-      template: "gatling run -s {{simulation_class}} -rf {{output_dir}}"
+      command: "gatling run -s {{simulation_class}} -rf {{output_dir}}"
     profiles:
       http-get:
         description: "HTTP GET via Gatling simulation"
-        params:
+        config: profiles/gatling/http-get.scala
+        overrides:
           target_url:
             default: "https://httpbin.org/get"
           rate_per_sec:
@@ -176,36 +108,28 @@ tools:
     description: "HTTP load testing by Uber (Go, single binary)"
     install: "brew install vegeta"
     run:
-      template: "echo 'GET {{target_url}}' | vegeta attack -rate={{rate}} -duration={{duration}}s | vegeta report --type=json"
+      command: "echo 'GET {{target_url}}' | vegeta attack -rate={{rate}} -duration={{duration}}s -output={{output_file}} && vegeta report --type=json {{output_file}}"
     profiles:
       http-get:
         description: "HTTP GET at constant rate"
-        params:
+        overrides:
           target_url:
             default: "https://httpbin.org/get"
           rate_per_sec:
             default: 50
           duration_sec:
             default: 30
-        bash: |
-          echo 'GET ${TARGET_URL:-https://httpbin.org/get}' \
-            | vegeta attack \
-              -rate=${RATE:-50} \
-              -duration=${DURATION:-30}s \
-              -output=/tmp/vegeta.bin
-          vegeta report --type=json --input=/tmp/vegeta.bin
-          rm -f /tmp/vegeta.bin
 
   # ── wrk ───────────────────────────────────────────────────────────────
   wrk:
     description: "HTTP benchmarking tool (C, single binary)"
     install: "brew install wrk"
     run:
-      template: "wrk -t{{threads}} -c{{connections}} -d{{duration}}s --latency {{target_url}}"
+      command: "wrk -t{{threads}} -c{{connections}} -d{{duration}}s --latency {{target_url}}"
     profiles:
       http-get:
         description: "HTTP GET with fixed concurrency"
-        params:
+        overrides:
           target_url:
             default: "https://httpbin.org/get"
           threads:
@@ -214,6 +138,3 @@ tools:
             default: 100
           duration_sec:
             default: 30
-        bash: |
-          wrk -t${THREADS:-4} -c${CONNECTIONS:-100} -d${DURATION:-30}s \
-            --latency ${TARGET_URL:-https://httpbin.org/get}

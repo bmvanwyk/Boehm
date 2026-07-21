@@ -1,0 +1,34 @@
+{
+    // Tulip CPU-only demo profile
+    // Uses DemoUser with noop/delay actions — no HTTP calls.
+    "actions": {
+        "output_filename": "",
+        "report_filename": "",
+        "user_class": "org.example.user.DemoUser",
+        "user_params": {
+            "delay1": "0",
+            "delay2": "0"
+        }
+    },
+    "contexts": {
+        "default": {
+            "enabled": true,
+            "num_users": 10,
+            "num_threads": 2
+        }
+    },
+    "benchmarks": {
+        "boehm-demo": {
+            "enabled": true,
+            "aps_rate": 0.0,
+            "warmup_duration1": 2,
+            "warmup_duration2": 0,
+            "benchmark_duration": 0,
+            "benchmark_iterations": 1,
+            "scenario_actions": [
+                { "id": 8, "weight": 50 },
+                { "id": 9, "weight": 50 }
+            ]
+        }
+    }
+}

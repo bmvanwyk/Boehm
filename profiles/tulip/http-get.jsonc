@@ -1,0 +1,38 @@
+{
+    // Tulip HTTP GET benchmark profile
+    // Target URL, rate, duration, and warmup are overridden at runtime.
+    // See catalog.yaml for override path mappings.
+    "actions": {
+        "output_filename": "",
+        "report_filename": "",
+        "user_class": "org.example.user.TestHttpUser",
+        "user_params": {
+            "url": ""
+        },
+        "user_actions": {
+            "0": "onStart",
+            "3": "GET",
+            "100": "onStop"
+        }
+    },
+    "contexts": {
+        "default": {
+            "enabled": true,
+            "num_users": 5,
+            "num_threads": 1
+        }
+    },
+    "benchmarks": {
+        "boehm-benchmark": {
+            "enabled": true,
+            "aps_rate": 0.0,
+            "warmup_duration1": 0,
+            "warmup_duration2": 0,
+            "benchmark_duration": 0,
+            "benchmark_iterations": 1,
+            "scenario_actions": [
+                { "id": 3, "weight": 0 }
+            ]
+        }
+    }
+}
