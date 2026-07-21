@@ -1,11 +1,18 @@
 package io.boehm
 
+import io.boehm.adapters.PerfToolAdapter
+import io.boehm.adapters.tulip.TulipParser
 import io.boehm.auth.AuthHandler
+import io.boehm.catalog.CatalogAdapter
+import io.boehm.catalog.CatalogLoader
 import io.boehm.core.McpHandler
 import io.boehm.core.Store
+import io.boehm.model.RunResult
 import java.io.File
 
 fun main(args: Array<String>) {
+    val baseDir = System.getProperty("user.dir")
+    val catalogPath = System.getenv("BOEHM_CATALOG_PATH") ?: "$baseDir/catalog.yaml"
     val dbPath = System.getenv("BOEHM_DB_PATH") ?: "${System.getProperty("user.home")}/.boehm/boehm.db"
     val token = args.find { it.startsWith("--token=") }?.substringAfter("--token=")
         ?: System.getenv("BOEHM_TOKEN")
@@ -17,9 +24,28 @@ fun main(args: Array<String>) {
     authHandler.createToken(token)
 
     val store = Store(dbPath)
-    store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
 
-    val mcpHandler = McpHandler(authHandler, store)
+    // Build parser registry
+    val parsers: Map<String, (String) -> RunResult> = mapOf(
+        "tulip-results" to { raw -> TulipParser.parse(raw) }
+    )
+
+    // Load catalog and create adapters
+    val catalog = CatalogLoader(catalogPath).load()
+    val adapters: List<PerfToolAdapter> = catalog.tools.flatMap { (name, toolDef) ->
+        toolDef.profiles.keys.map { profileName ->
+            CatalogAdapter(toolDef, profileName, baseDir, parsers)
+        }
+    }
+
+    // Pre-register adapters in store so list_adapters works immediately
+    adapters.forEach { adapter ->
+        val typesJson = """["http"]"""
+        store.insertAdapter(adapter.name, typesJson, adapter.version,
+            """["0.x"]""")
+    }
+
+    val mcpHandler = McpHandler(authHandler, store, adapters)
 
     val reader = System.`in`.bufferedReader()
     while (true) {

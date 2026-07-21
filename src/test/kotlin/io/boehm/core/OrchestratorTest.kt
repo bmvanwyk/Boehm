@@ -27,14 +27,14 @@ class OrchestratorTest {
 
     @Test
     fun `submitRun with known adapter returns runId`() {
-        val plan = TestPlan("http", "https://example.com", 100, 10)
+        val plan = TestPlan(type = "http", targetUrl = "https://example.com", ratePerSec = 100, durationSec = 10)
         val runId = orchestrator.submitRun("tulip", "test-1", plan)
         assertNotNull(runId)
     }
 
     @Test
     fun `submitRun with unknown adapter returns null`() {
-        val plan = TestPlan("http", "https://example.com", 100, 10)
+        val plan = TestPlan(type = "http", targetUrl = "https://example.com", ratePerSec = 100, durationSec = 10)
         val runId = orchestrator.submitRun("nonexistent", "test-1", plan)
         assertNull(runId)
     }

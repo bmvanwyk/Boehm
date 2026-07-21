@@ -3,12 +3,14 @@ package io.boehm.core
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import io.boehm.adapters.PerfToolAdapter
 import io.boehm.auth.AuthHandler
 import io.boehm.model.TestPlan
 
 class McpHandler(
     private val authHandler: AuthHandler,
     private val store: Store,
+    private val adapters: List<PerfToolAdapter> = emptyList(),
     private val serverVersion: String = "0.1.0",
     private val startupTime: Long = System.currentTimeMillis()
 ) {
@@ -43,7 +45,9 @@ class McpHandler(
 
         initialized = true
         if (orchestrator == null) {
-            orchestrator = Orchestrator(store)
+            val orch = Orchestrator(store)
+            adapters.forEach { orch.registerAdapter(it) }
+            orchestrator = orch
         }
 
         return gson.toJson(mapOf(
@@ -87,13 +91,20 @@ class McpHandler(
         val testName = args.get("test_name")?.asString ?: return errorResponse(id, -32001, "Missing test_name")
         val testPlanJson = args.getAsJsonObject("test_plan") ?: return errorResponse(id, -32001, "Missing test_plan")
 
+        val knownFields = setOf("type", "profile", "target_url", "rate_per_sec", "duration_sec", "warmup_sec", "timeout_sec")
+        val parameters = testPlanJson.entrySet()
+            .filterNot { knownFields.contains(it.key) }
+            .associate { it.key to (it.value?.asString ?: "") }
+
         val plan = TestPlan(
             type = testPlanJson.get("type")?.asString ?: "http",
+            profile = testPlanJson.get("profile")?.asString ?: "http-get",
             targetUrl = testPlanJson.get("target_url")?.asString ?: "",
-            ratePerSec = testPlanJson.get("rate_per_sec")?.asInt ?: 100,
+            ratePerSec = testPlanJson.get("rate_per_sec")?.asInt ?: 50,
             durationSec = testPlanJson.get("duration_sec")?.asInt ?: 30,
             warmupSec = testPlanJson.get("warmup_sec")?.asInt ?: 5,
-            timeoutSec = testPlanJson.get("timeout_sec")?.asInt ?: 60
+            timeoutSec = testPlanJson.get("timeout_sec")?.asInt ?: 60,
+            parameters = parameters
         )
 
         val orchestrator = orchestrator!!

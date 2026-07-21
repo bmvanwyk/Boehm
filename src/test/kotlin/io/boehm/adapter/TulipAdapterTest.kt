@@ -1,24 +1,56 @@
 package io.boehm.adapter
 
-import io.boehm.adapters.tulip.TulipAdapter
+import io.boehm.adapters.tulip.TulipParser
+import io.boehm.catalog.CatalogAdapter
+import io.boehm.catalog.*
 import io.boehm.model.TestPlan
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.io.File
 
 class TulipAdapterTest {
+    private val baseDir = File("").absolutePath
     private val mockScript = File("src/test/fixtures/mock-tulip.sh").absolutePath
+
+    private fun makeAdapter(): CatalogAdapter {
+        val toolDef = ToolDef(
+            name = "tulip",
+            description = "Test tool",
+            install = null,
+            run = RunDef(command = "$mockScript --config {{config_file}}"),
+            profiles = mapOf(
+                "http-get" to ProfileDef(
+                    name = "http-get",
+                    description = null,
+                    config = "profiles/tulip/http-get.jsonc",
+                    output = OutputDef(
+                        path = "{{config.actions.output_filename}}",
+                        format = "json",
+                        schema = "tulip-results"
+                    ),
+                    overrides = mapOf(
+                        "target_url" to OverrideDef(path = "actions.user_params.url", default = "https://httpbin.org/get"),
+                        "rate_per_sec" to OverrideDef(path = "benchmarks.boehm-benchmark.aps_rate", default = 50),
+                        "duration_sec" to OverrideDef(path = "benchmarks.boehm-benchmark.benchmark_duration", default = 30),
+                        "warmup_sec" to OverrideDef(path = "benchmarks.boehm-benchmark.warmup_duration1", default = 5)
+                    )
+                )
+            )
+        )
+        val parsers = mapOf("tulip-results" to { raw: String -> TulipParser.parse(raw) })
+        return CatalogAdapter(toolDef, "http-get", baseDir, parsers)
+    }
 
     @Test
     fun `adapter name and version are set`() {
-        val adapter = TulipAdapter(tulipCommand = mockScript)
+        val adapter = makeAdapter()
         assertEquals("tulip", adapter.name)
         assertTrue(adapter.version.isNotBlank())
     }
 
     @Test
     fun `run executes CLI and returns RunResult`() {
-        val adapter = TulipAdapter(tulipCommand = mockScript)
+        val adapter = makeAdapter()
         val plan = TestPlan(
             type = "http",
             targetUrl = "https://httpbin.org/get",
@@ -35,7 +67,7 @@ class TulipAdapterTest {
 
     @Test
     fun `validate rejects missing targetUrl`() {
-        val adapter = TulipAdapter(tulipCommand = mockScript)
+        val adapter = makeAdapter()
         val plan = TestPlan(
             type = "http",
             targetUrl = "",
@@ -48,7 +80,7 @@ class TulipAdapterTest {
 
     @Test
     fun `validate rejects zero duration`() {
-        val adapter = TulipAdapter(tulipCommand = mockScript)
+        val adapter = makeAdapter()
         val plan = TestPlan(
             type = "http",
             targetUrl = "https://example.com",
@@ -61,7 +93,7 @@ class TulipAdapterTest {
 
     @Test
     fun `validate accepts valid plan`() {
-        val adapter = TulipAdapter(tulipCommand = mockScript)
+        val adapter = makeAdapter()
         val plan = TestPlan(
             type = "http",
             targetUrl = "https://httpbin.org/get",
