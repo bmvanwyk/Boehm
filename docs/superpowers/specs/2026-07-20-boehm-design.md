@@ -827,7 +827,7 @@ Each performance tool produces output in a different format. The adapter layer t
 | **k6** | JSON (`--out json`) | Parse JSON directly — summary object contains all latency percentiles, throughput, error rates | All `RunResult.summary` fields |
 | **JMeter** | JTL/CSV + HTML | Parse JTL CSV for raw timestamps, compute percentiles and throughput server-side. HTML report preserved at `rawOutputPath` | Latency percentiles computed from raw samples; throughput from elapsed time |
 | **Gatling** | `simulation.log` + HTML | Parse `simulation.log` text format. Extract percentiles from GROUP/REQUEST entries | `p50`/`p95`/`p99` from log; `maxMs` from slowest request |
-| **Tulip** | JSON + HdrHistogram | In-process Kotlin — read HdrHistogram for exact percentiles | All fields (highest fidelity, same JVM) |
+| **Tulip** | JSON (native output contains all run details) | Parse JSON directly — throughput, latency percentiles, error rate, and HdrHistogram data are all in the output. In-process Kotlin avoids serialization overhead | All fields (native JSON, highest fidelity, same JVM) |
 | **wrk/wrk2** | Text stdout | Parse threaded summary: `Latency` line for percentiles, `Req/Sec` for throughput | `p50`/`p75`/`p99` from wrk output |
 | **Custom script** | stdout | User-provided parser or match one of the above formats | Depends on parser |
 
