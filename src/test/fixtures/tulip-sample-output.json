@@ -1,0 +1,19 @@
+{
+  "tool": "tulip",
+  "testName": "http-get",
+  "status": "completed",
+  "duration": 30,
+  "totalRequests": 2850,
+  "throughputPerSec": 95.0,
+  "errorRatePct": 0.0,
+  "latencyMs": {
+    "min": 2.1,
+    "p50": 8.5,
+    "p90": 22.3,
+    "p95": 35.0,
+    "p99": 68.1,
+    "max": 210.0
+  },
+  "rawOutputPath": "/tmp/tulip-output.json",
+  "metadata": {}
+}
