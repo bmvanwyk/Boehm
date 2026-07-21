@@ -1586,13 +1586,13 @@ This gradual rollout prevents noisy CI from blocking development velocity.
 | Tool adapter failure | Developer checks tool version | SRE if infrastructure issue; adapter maintainer if adapter bug |
 | SQLite corruption | Restore from backup | Admin if no backup available |
 
-### Phase 1 — MCP Server Scaffold + First Adapter
+### Phase 1 — MCP Server Scaffold + Tulip Adapter
 - Gradle project setup with MCP protocol support (direct JSON-RPC or SDK)
 - Core layer: MCP handler, orchestrator, run recording, SQLite schema
 - Run scheduler with serial execution
-- First adapter (Tulip or k6)
-- `list_adapters`, `run_test`, `get_run` tools
-- Unit tests + integration test against httpbin.org
+- Tulip adapter (in-process JVM, parses native JSON output)
+- `list_adapters`, `run_test`, `get_run`, `server_status`, `get_run_progress` tools
+- Unit tests + integration test against a target using Tulip
 - Fixed: tool-timeout handling, test plan validation
 
 ### Phase 2 — Baseline & Comparison
@@ -1618,7 +1618,7 @@ This gradual rollout prevents noisy CI from blocking development velocity.
 - Encryption at rest verification
 
 ### Phase 4 — Additional Adapters
-- Second adapter
+- Second adapter (k6 — shell exec)
 - Adapter developer guide (with fixture template)
 - CI test matrix (multiple tool versions × OS)
 

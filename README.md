@@ -31,7 +31,7 @@ Boehm is not just a test runner. It's an engineer with:
 
 | Phase | What |
 |---|---|
-| 1 | MCP server scaffold + first tool adapter |
+| 1 | MCP server scaffold + Tulip adapter |
 | 2 | Baseline store, comparison, regression thresholds |
 | 3 | Evals and correctness testing |
 | 4 | More tool adapters |
