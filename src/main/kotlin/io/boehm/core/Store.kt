@@ -116,6 +116,16 @@ class Store(private val dbPath: String) {
         }
     }
 
+    fun getScenarioById(id: String): ScenarioRow? {
+        conn.prepareStatement("SELECT id, tool, name, test_plan, created_at FROM test_scenarios WHERE id = ?").use { ps ->
+            ps.setString(1, id)
+            ps.executeQuery().use { rs ->
+                return if (rs.next()) ScenarioRow(rs.getString("id"), rs.getString("tool"),
+                    rs.getString("name"), rs.getString("test_plan"), rs.getString("created_at")) else null
+            }
+        }
+    }
+
     fun insertRun(scenarioId: String, tool: String): String? {
         val id = UUID.randomUUID().toString()
         conn.prepareStatement("INSERT INTO runs (id, scenario_id, tool) VALUES (?, ?, ?)").use { ps ->
