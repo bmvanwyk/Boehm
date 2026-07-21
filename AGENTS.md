@@ -56,10 +56,17 @@ Read the design spec before changing behaviour.
 ## Build and Run
 
 ```bash
-./gradlew build          # Compile + test
-./gradlew test           # Run tests
+./gradlew build                       # Compile + test
+./gradlew test                        # Run tests
+./gradlew test jacocoTestReport       # Tests + coverage report (HTML at build/reports/jacoco/)
 ./gradlew run --args="--token=<your-token>"   # Start MCP server
 ```
+
+## Quality Standards
+
+- **Code coverage: minimum 80%** (instructions). Run `./gradlew test jacocoTestReport` and check the HTML report. Coverage below 80% should be improved before committing.
+- All new adapter profiles must include a parser integration test.
+- All new MCP tools must include a handler test.
 
 ## Design Status
 
