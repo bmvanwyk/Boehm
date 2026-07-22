@@ -4,13 +4,16 @@ import com.google.gson.Gson
 import io.boehm.adapters.PerfToolAdapter
 import io.boehm.model.TestPlan
 import java.util.concurrent.Executors
+import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
 
 class Scheduler(
     private val store: Store,
     private val adapters: List<PerfToolAdapter>
 ) {
-    private val executor = Executors.newSingleThreadScheduledExecutor()
+    private val executor = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "boehm-scheduler").also { it.isDaemon = true }
+    }
     private val gson = Gson()
     private val adapterMap = adapters.associateBy { it.name }
     private var running = false
