@@ -15,7 +15,7 @@ class Scheduler(
         Thread(r, "boehm-scheduler").also { it.isDaemon = true }
     }
     private val gson = Gson()
-    private val adapterMap = adapters.associateBy { it.name }
+    private val adapterMap = adapters.associateBy { "${it.name}:${it.profile}" }
     private var running = false
 
     fun start() {
@@ -40,10 +40,10 @@ class Scheduler(
             val scenario = store.getScenarioById(scenarioId) ?: return
 
             val testPlan = gson.fromJson(scenario.testPlan, TestPlan::class.java)
-            val adapter = adapterMap[pending.tool]
+            val adapter = adapterMap["${pending.tool}:${testPlan.profile}"]
 
             if (adapter == null) {
-                store.updateRunStatus(pending.id, "failed", error = "Adapter not found: ${pending.tool}")
+                store.updateRunStatus(pending.id, "failed", error = "Adapter not found: ${pending.tool}:${testPlan.profile}")
                 return
             }
 

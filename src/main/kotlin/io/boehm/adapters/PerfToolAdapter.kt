@@ -4,6 +4,7 @@ import io.boehm.model.*
 
 interface PerfToolAdapter {
     val name: String
+    val profile: String
     val supportedTestTypes: List<TestType>
     val version: String
     val toolVersions: List<String>

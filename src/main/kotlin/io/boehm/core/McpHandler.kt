@@ -107,25 +107,30 @@ class McpHandler(
             parameters = parameters
         )
 
-        val orchestrator = orchestrator!!
-        val runId = orchestrator.submitRun(tool, testName, plan)
-        if (runId == null) {
-            return errorResponse(id, -32000, "Adapter not found: $tool",
-                mapOf("available_adapters" to store.listAdapters().map { it.name }))
+        return when (val result = orchestrator!!.submitRun(tool, testName, plan)) {
+            is Orchestrator.SubmitResult.Queued -> {
+                val run = store.getRun(result.runId)
+                gson.toJson(mapOf(
+                    "jsonrpc" to "2.0",
+                    "id" to id,
+                    "result" to mapOf(
+                        "runId" to result.runId,
+                        "tool" to tool,
+                        "testName" to testName,
+                        "status" to (run?.status ?: "queued"),
+                        "summary" to null
+                    )
+                ))
+            }
+            is Orchestrator.SubmitResult.UnknownAdapter ->
+                errorResponse(id, -32000, "Adapter not found: ${result.tool}",
+                    mapOf("available_adapters" to store.listAdapters().map { it.name }))
+            is Orchestrator.SubmitResult.UnknownProfile ->
+                errorResponse(id, -32001, "Unknown profile '${result.profile}' for tool '${result.tool}'")
+            is Orchestrator.SubmitResult.Invalid ->
+                errorResponse(id, -32001, "Invalid test plan",
+                    mapOf("validation_errors" to result.errors.map { "${it.field}: ${it.message}" }))
         }
-
-        val run = store.getRun(runId)
-        return gson.toJson(mapOf(
-            "jsonrpc" to "2.0",
-            "id" to id,
-            "result" to mapOf(
-                "runId" to runId,
-                "tool" to tool,
-                "testName" to testName,
-                "status" to (run?.status ?: "queued"),
-                "summary" to null
-            )
-        ))
     }
 
     private fun handleGetRun(args: JsonObject, id: Any): String {

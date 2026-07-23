@@ -20,7 +20,9 @@ class CatalogAdapter(
     override val version: String = "0.1.0"
 ) : PerfToolAdapter {
 
-    private val profile: ProfileDef
+    override val profile: String get() = profileName
+
+    private val profileDef: ProfileDef
         get() = toolDef.profiles[profileName]
             ?: error("Profile '$profileName' not found for tool '${toolDef.name}'")
 
@@ -39,20 +41,19 @@ class CatalogAdapter(
             errors.add(ValidationError("profile", "Unknown profile '$profileName' for tool '${toolDef.name}'"))
             return errors
         }
-        if (testPlan.targetUrl.isBlank() && profile.overrides.containsKey("target_url")) {
+        if (testPlan.targetUrl.isBlank() && profileDef.overrides.containsKey("target_url")) {
             errors.add(ValidationError("targetUrl", "must not be empty"))
         }
-        if (testPlan.durationSec <= 0 && profile.overrides.containsKey("duration_sec")) {
+        if (testPlan.durationSec <= 0 && profileDef.overrides.containsKey("duration_sec")) {
             errors.add(ValidationError("durationSec", "must be > 0"))
         }
-        if (testPlan.ratePerSec <= 0 && profile.overrides.containsKey("rate_per_sec")) {
+        if (testPlan.ratePerSec <= 0 && profileDef.overrides.containsKey("rate_per_sec")) {
             errors.add(ValidationError("ratePerSec", "must be > 0"))
         }
         return errors
     }
 
     override fun run(testPlan: TestPlan): RunResult {
-        val profile = profile
         val overrides = resolveOverrides(testPlan)
 
         val outputDir = File(System.getProperty("user.home"), ".boehm/outputs/${toolDef.name}")
@@ -60,8 +61,8 @@ class CatalogAdapter(
         val outputFile = File(outputDir, "${Instant.now().toString().replace(":", "-")}.json")
 
         // Load config template (JSON-based: apply overrides; script-based: copy as-is)
-        val configAndOutput = if (profile.config != null) {
-            val templateFile = File(baseDir, profile.config)
+        val configAndOutput =         if (profileDef.config != null) {
+            val templateFile = File(baseDir, profileDef.config)
             if (!templateFile.exists()) {
                 return failedResult(testPlan, "Config template not found: ${templateFile.absolutePath}")
             }
@@ -69,31 +70,31 @@ class CatalogAdapter(
             val (preparedJson, outPath) = if (isJsonConfig) {
                 val rawTemplate = templateFile.readText()
                 val cleanTemplate = stripJsoncComments(rawTemplate)
-                val modifiedJson = applyJsonOverrides(cleanTemplate, profile, overrides)
+                val modifiedJson = applyJsonOverrides(cleanTemplate, profileDef, overrides)
 
                 // Inject output path into config JSON at the path declared in output.path
                 val configRoot = JsonParser.parseString(modifiedJson).asJsonObject
                 val configPattern = Regex("""\{\{config\.(.+?)\}\}""")
-                val configMatch = configPattern.find(profile.output.path)
+                val configMatch = configPattern.find(profileDef.output.path)
                 if (configMatch != null) {
                     val configJsonPath = configMatch.groupValues[1]
                     setJsonPath(configRoot, configJsonPath, outputFile.absolutePath)
                 }
                 val finalJson = GsonBuilder().setPrettyPrinting().create().toJson(configRoot)
                 val tmpConfig = writeTempConfig(finalJson)
-                val resolvedPath = resolveOutputPath(profile.output.path, tmpConfig, outputFile.absolutePath)
+                val resolvedPath = resolveOutputPath(profileDef.output.path, tmpConfig, outputFile.absolutePath)
                 Pair(tmpConfig, resolvedPath)
             } else {
                 // Script-based tools: copy template as-is without mutation
                 val tmpDir = Files.createTempDirectory("boehm-${toolDef.name}-").toFile()
                 val tmpFile = File(tmpDir, templateFile.name)
                 templateFile.copyTo(tmpFile, overwrite = true)
-                val resolvedPath = resolveOutputPath(profile.output.path, null, outputFile.absolutePath)
+                val resolvedPath = resolveOutputPath(profileDef.output.path, null, outputFile.absolutePath)
                 Pair(tmpFile, resolvedPath)
             }
             Pair(preparedJson, outPath)
         } else {
-            Pair(null, resolveOutputPath(profile.output.path, null, outputFile.absolutePath))
+            Pair(null, resolveOutputPath(profileDef.output.path, null, outputFile.absolutePath))
         }
         val configFile = configAndOutput.first
         val resolvedOutputPath = configAndOutput.second
@@ -117,10 +118,10 @@ class CatalogAdapter(
         configFile?.parentFile?.delete()
 
         // Read output
-        val rawOutput = readOutput(profile.output.path, resolvedOutputPath, stdout)
+        val rawOutput = readOutput(profileDef.output.path, resolvedOutputPath, stdout)
 
         // Parse
-        val parser = parsers[profile.output.schema]
+        val parser = parsers[profileDef.output.schema]
         if (parser != null) {
             return try {
                 parser(rawOutput).copy(rawOutputPath = resolvedOutputPath)
@@ -144,7 +145,7 @@ class CatalogAdapter(
 
     private fun resolveOverrides(testPlan: TestPlan): Map<String, String> {
         val result = mutableMapOf<String, String>()
-        for ((name, overrideDef) in profile.overrides) {
+        for ((name, overrideDef) in profileDef.overrides) {
             if (overrideDef.default != null) {
                 result[name] = overrideDef.default.toString()
             }
@@ -156,12 +157,12 @@ class CatalogAdapter(
             "warmup_sec" to testPlan.warmupSec.toString()
         )
         for ((name, value) in testPlanMap) {
-            if (name in profile.overrides && value.isNotBlank()) {
+            if (name in profileDef.overrides && value.isNotBlank()) {
                 result[name] = value
             }
         }
         for ((name, value) in testPlan.parameters) {
-            if (name in profile.overrides) {
+            if (name in profileDef.overrides) {
                 result[name] = value
             }
         }

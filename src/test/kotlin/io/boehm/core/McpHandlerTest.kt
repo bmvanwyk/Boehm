@@ -227,4 +227,37 @@ class McpHandlerTest {
         assertTrue(response.contains(""""status":"running""""), "Expected running status: $response")
         assertTrue(response.contains(""""currentStage":"running""""), "Expected running stage: $response")
     }
+
+    private fun tulipMock() = object : io.boehm.adapters.PerfToolAdapter {
+        override val name = "tulip"
+        override val profile = "http-get"
+        override val supportedTestTypes = listOf(io.boehm.model.TestType.HTTP)
+        override val version = "0.1.0"
+        override val toolVersions = listOf("0.x")
+        override fun validate(testPlan: io.boehm.model.TestPlan): List<io.boehm.model.ValidationError> =
+            if (testPlan.targetUrl.isBlank()) listOf(io.boehm.model.ValidationError("targetUrl", "must not be empty"))
+            else emptyList()
+        override fun run(testPlan: io.boehm.model.TestPlan): io.boehm.model.RunResult =
+            throw UnsupportedOperationException()
+    }
+
+    @Test
+    fun `run_test with unknown profile returns -32001`() {
+        val store = Store(":memory:")
+        val h = McpHandler(authHandler, store, listOf(tulipMock()))
+        h.handle("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"auth_token":"test-token"}}""")
+        val response = h.handle("""{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_test","arguments":{"tool":"tulip","test_name":"t","test_plan":{"type":"http","profile":"nope","target_url":"https://example.com"}}}}""")
+        assertTrue(response.contains("-32001"), response)
+        assertTrue(response.contains("Unknown profile"), response)
+    }
+
+    @Test
+    fun `run_test with invalid plan returns -32001 with validation errors`() {
+        val store = Store(":memory:")
+        val h = McpHandler(authHandler, store, listOf(tulipMock()))
+        h.handle("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"auth_token":"test-token"}}""")
+        val response = h.handle("""{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_test","arguments":{"tool":"tulip","test_name":"t","test_plan":{"type":"http","profile":"http-get","target_url":""}}}}""")
+        assertTrue(response.contains("-32001"), response)
+        assertTrue(response.contains("validation_errors"), response)
+    }
 }

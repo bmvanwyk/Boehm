@@ -22,7 +22,7 @@ class SchedulerTest {
         scheduler = Scheduler(store, listOf(adapter))
         scheduler.start()
 
-        val plan = """{"type":"http","targetUrl":"https://example.com","ratePerSec":100,"durationSec":5}"""
+        val plan = """{"type":"http","profile":"http-get","targetUrl":"https://example.com","ratePerSec":100,"durationSec":5}"""
         val scenarioId = store.insertScenario("tulip", "test-1", plan)!!
         val runId = store.insertRun(scenarioId, "tulip")!!
         store.updateRunStatus(runId, "queued")
@@ -38,8 +38,8 @@ class SchedulerTest {
         scheduler = Scheduler(store, listOf(adapter))
         scheduler.start()
 
-        val plan1 = """{"type":"http","targetUrl":"https://example.com","ratePerSec":100,"durationSec":1}"""
-        val plan2 = """{"type":"http","targetUrl":"https://other.com","ratePerSec":100,"durationSec":1}"""
+        val plan1 = """{"type":"http","profile":"http-get","targetUrl":"https://example.com","ratePerSec":100,"durationSec":1}"""
+        val plan2 = """{"type":"http","profile":"http-get","targetUrl":"https://other.com","ratePerSec":100,"durationSec":1}"""
         val s1 = store.insertScenario("tulip", "test-1", plan1)!!
         val s2 = store.insertScenario("tulip", "test-2", plan2)!!
         val r1 = store.insertRun(s1, "tulip")!!
@@ -65,10 +65,42 @@ class SchedulerTest {
         }
         return store.getRun(runId)
     }
+
+    @Test
+    fun `scheduler executes adapter matching plan profile`() {
+        val httpAdapter = TestAdapter()
+        val demoAdapter = object : PerfToolAdapter {
+            override val name = "tulip"
+            override val profile = "demo"
+            override val supportedTestTypes = listOf(TestType.HTTP)
+            override val version = "0.1.0"
+            override val toolVersions = listOf("0.x")
+            override fun validate(testPlan: TestPlan) = emptyList<ValidationError>()
+            override fun run(testPlan: TestPlan) = RunResult(
+                tool = "tulip", testName = "test",
+                timestamp = java.time.Instant.now().toString(),
+                runId = java.util.UUID.randomUUID().toString(),
+                status = "failed", summary = null, rawOutputPath = null,
+                metadata = mapOf("error" to "demo adapter ran")
+            )
+        }
+        scheduler = Scheduler(store, listOf(httpAdapter, demoAdapter))
+        scheduler.start()
+
+        val plan = """{"type":"http","profile":"demo","targetUrl":"https://example.com"}"""
+        val scenarioId = store.insertScenario("tulip", "test-demo", plan)!!
+        val runId = store.insertRun(scenarioId, "tulip")!!
+        store.updateRunStatus(runId, "queued")
+
+        val run = waitForStatus(runId, "failed", 5)
+        assertEquals("failed", run!!.status)
+        scheduler.stop()
+    }
 }
 
 class TestAdapter() : PerfToolAdapter {
     override val name = "tulip"
+    override val profile = "http-get"
     override val supportedTestTypes = listOf(TestType.HTTP)
     override val version = "0.1.0"
     override val toolVersions = listOf("0.x")
