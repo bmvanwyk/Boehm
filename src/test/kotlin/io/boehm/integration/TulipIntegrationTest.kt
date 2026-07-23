@@ -56,7 +56,8 @@ class TulipIntegrationTest {
             targetUrl = "https://httpbin.org/get",
             ratePerSec = 50,
             durationSec = 10,
-            warmupSec = 2
+            warmupSec = 2,
+            timeoutSec = 300
         )
 
         val result = adapter.run(plan)
