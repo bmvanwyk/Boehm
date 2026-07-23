@@ -132,4 +132,20 @@ class TulipAdapterTest {
         val result = adapter.run(TestPlan(type = "http"))
         assertEquals("failed", result.status)
     }
+
+    @Test
+    fun `run exceeding timeout returns failed with timeout error`() {
+        val toolDef = ToolDef(
+            name = "tulip", description = "", install = null,
+            run = RunDef(command = "sleep 30"),
+            profiles = mapOf("http-get" to ProfileDef("http-get", null, null,
+                OutputDef("{{output_file}}", "json", "tulip-results"), emptyMap()))
+        )
+        val adapter = CatalogAdapter(toolDef, "http-get", baseDir)
+        val plan = TestPlan(type = "http", timeoutSec = 1)
+        val result = adapter.run(plan)
+        assertEquals("failed", result.status)
+        assertTrue(result.metadata["error"].toString().contains("timeout"),
+            "expected timeout error, got: ${result.metadata}")
+    }
 }

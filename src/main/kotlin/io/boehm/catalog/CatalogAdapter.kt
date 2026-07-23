@@ -10,6 +10,8 @@ import java.io.File
 import java.nio.file.Files
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 
 class CatalogAdapter(
     private val toolDef: ToolDef,
@@ -105,14 +107,28 @@ class CatalogAdapter(
         if (configFile != null) subs["config_file"] = configFile.absolutePath
         subs["output_file"] = resolvedOutputPath ?: outputFile.absolutePath
 
-        // Execute command
+        // Execute command, enforcing the test plan timeout
         val rawCommand = commandOverride ?: toolDef.run.command
         val command = substituteCommand(rawCommand, subs)
-        val executor = ProcessBuilder("bash", "-c", command)
+        val process = ProcessBuilder("bash", "-c", command)
             .redirectErrorStream(true)
             .start()
-        val stdout = executor.inputStream.bufferedReader().readText()
-        val exitCode = executor.waitFor()
+        val stdoutFuture = CompletableFuture.supplyAsync {
+            process.inputStream.bufferedReader().readText()
+        }
+        val finished = process.waitFor(testPlan.timeoutSec.toLong(), TimeUnit.SECONDS)
+        if (!finished) {
+            process.descendants().forEach { it.destroyForcibly() }
+            process.destroyForcibly()
+            process.waitFor(2, TimeUnit.SECONDS)
+            val partial = try { stdoutFuture.get(2, TimeUnit.SECONDS) } catch (e: Exception) { "" }
+            configFile?.delete()
+            configFile?.parentFile?.delete()
+            return failedResult(testPlan, "timeout after ${testPlan.timeoutSec}s",
+                metadata = mapOf("stdout" to partial.take(500)))
+        }
+        val stdout = try { stdoutFuture.get(2, TimeUnit.SECONDS) } catch (e: Exception) { "" }
+        val exitCode = process.exitValue()
 
         configFile?.delete()
         configFile?.parentFile?.delete()
