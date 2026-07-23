@@ -775,6 +775,7 @@ Boehm verdicts can be mapped to SLO policies:
 ```kotlin
 interface PerfToolAdapter {
     val name: String
+    val profile: String
     val supportedTestTypes: List<TestType>
     val version: String                     // adapter version, not tool version
     val toolVersions: List<String>          // tested tool versions (e.g., ["k6 0.54.x"])
