@@ -4,7 +4,6 @@ import com.google.gson.Gson
 import io.boehm.adapters.PerfToolAdapter
 import io.boehm.model.TestPlan
 import java.util.concurrent.Executors
-import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
 
 class Scheduler(
@@ -21,6 +20,10 @@ class Scheduler(
     fun start() {
         if (running) return
         running = true
+        val interrupted = store.failInterruptedRuns()
+        if (interrupted > 0) {
+            System.err.println("boehm: marked $interrupted interrupted run(s) as failed")
+        }
         executor.scheduleWithFixedDelay({ pollQueue() }, 0, 500, TimeUnit.MILLISECONDS)
     }
 
@@ -30,30 +33,39 @@ class Scheduler(
     }
 
     private fun pollQueue() {
+        val pending = store.getPendingOrRunningRun() ?: return
+        if (pending.status == "running") return
+
         try {
-            val pending = store.getPendingOrRunningRun() ?: return
-            if (pending.status == "running") return
-
-            store.updateRunStatus(pending.id, "running")
-
-            val scenarioId = pending.scenarioId
-            val scenario = store.getScenarioById(scenarioId) ?: return
-
-            val testPlan = gson.fromJson(scenario.testPlan, TestPlan::class.java)
-            val adapter = adapterMap["${pending.tool}:${testPlan.profile}"]
-
-            if (adapter == null) {
-                store.updateRunStatus(pending.id, "failed", error = "Adapter not found: ${pending.tool}:${testPlan.profile}")
+            val scenario = store.getScenarioById(pending.scenarioId)
+            if (scenario == null) {
+                store.updateRunStatus(pending.id, "failed",
+                    error = "Scenario not found: ${pending.scenarioId}")
                 return
             }
 
+            val testPlan = gson.fromJson(scenario.testPlan, TestPlan::class.java)
+            val adapter = adapterMap["${pending.tool}:${testPlan.profile}"]
+            if (adapter == null) {
+                store.updateRunStatus(pending.id, "failed",
+                    error = "Adapter not found: ${pending.tool}:${testPlan.profile}")
+                return
+            }
+
+            store.updateRunStatus(pending.id, "running")
             val result = adapter.run(testPlan)
 
             val summaryJson = if (result.summary != null) gson.toJson(result.summary) else null
+            val error = if (result.status == "failed") result.metadata["error"]?.toString() else null
             store.updateRunStatus(pending.id, result.status, summary = summaryJson,
-                error = null, rawOutputPath = result.rawOutputPath)
-
-        } catch (_: Exception) {
+                error = error, rawOutputPath = result.rawOutputPath)
+        } catch (e: Exception) {
+            try {
+                store.updateRunStatus(pending.id, "failed",
+                    error = "${e.javaClass.simpleName}: ${e.message}")
+            } catch (_: Exception) {
+                // Store unavailable; nothing more we can do.
+            }
         }
     }
 }

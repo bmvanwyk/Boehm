@@ -96,11 +96,91 @@ class SchedulerTest {
         assertEquals("failed", run!!.status)
         scheduler.stop()
     }
+
+    @Test
+    fun `scheduler marks run failed when adapter throws and continues queue`() {
+        val bad = TestAdapter(shouldThrow = true)
+        val good = TestAdapter(profile = "demo")
+        scheduler = Scheduler(store, listOf(bad, good))
+        scheduler.start()
+
+        val p1 = """{"type":"http","profile":"http-get"}"""
+        val p2 = """{"type":"http","profile":"demo"}"""
+        val s1 = store.insertScenario("tulip", "t1", p1)!!
+        val s2 = store.insertScenario("tulip", "t2", p2)!!
+        val r1 = store.insertRun(s1, "tulip")!!
+        val r2 = store.insertRun(s2, "tulip")!!
+        store.updateRunStatus(r1, "queued")
+        store.updateRunStatus(r2, "queued")
+
+        val run1 = waitForStatus(r1, "failed", 5)
+        assertTrue(run1!!.error!!.contains("boom"), "expected boom in: ${run1.error}")
+        val run2 = waitForStatus(r2, "completed", 5)
+        assertEquals("completed", run2!!.status)
+        scheduler.stop()
+    }
+
+    @Test
+    fun `scheduler marks run failed when scenario is missing`() {
+        scheduler = Scheduler(store, listOf(TestAdapter()))
+        scheduler.start()
+        val runId = store.insertRun("no-such-scenario", "tulip")!!
+        store.updateRunStatus(runId, "queued")
+        val run = waitForStatus(runId, "failed", 5)
+        assertTrue(run!!.error!!.contains("Scenario not found"), "got: ${run.error}")
+        scheduler.stop()
+    }
+
+    @Test
+    fun `scheduler marks run failed when no adapter matches`() {
+        scheduler = Scheduler(store, emptyList())
+        scheduler.start()
+        val plan = """{"type":"http","profile":"http-get"}"""
+        val scenarioId = store.insertScenario("tulip", "t1", plan)!!
+        val runId = store.insertRun(scenarioId, "tulip")!!
+        store.updateRunStatus(runId, "queued")
+        val run = waitForStatus(runId, "failed", 5)
+        assertTrue(run!!.error!!.contains("Adapter not found"), "got: ${run.error}")
+        scheduler.stop()
+    }
+
+    @Test
+    fun `start marks interrupted running runs as failed`() {
+        val plan = """{"type":"http","profile":"http-get"}"""
+        val scenarioId = store.insertScenario("tulip", "t1", plan)!!
+        val runId = store.insertRun(scenarioId, "tulip")!!
+        store.updateRunStatus(runId, "running")
+
+        scheduler = Scheduler(store, listOf(TestAdapter()))
+        scheduler.start()
+
+        val run = waitForStatus(runId, "failed", 5)
+        assertEquals("failed", run!!.status)
+        assertTrue(run.error!!.contains("interrupted"), "got: ${run.error}")
+        scheduler.stop()
+    }
+
+    @Test
+    fun `scheduler persists adapter-reported failure error`() {
+        scheduler = Scheduler(store, listOf(TestAdapter(resultStatus = "failed", resultError = "kaboom")))
+        scheduler.start()
+        val plan = """{"type":"http","profile":"http-get"}"""
+        val scenarioId = store.insertScenario("tulip", "t1", plan)!!
+        val runId = store.insertRun(scenarioId, "tulip")!!
+        store.updateRunStatus(runId, "queued")
+        val run = waitForStatus(runId, "failed", 5)
+        assertEquals("kaboom", run!!.error)
+        scheduler.stop()
+    }
 }
 
-class TestAdapter() : PerfToolAdapter {
+class TestAdapter(
+    override val profile: String = "http-get",
+    private val resultStatus: String = "completed",
+    private val resultError: String? = null,
+    private val shouldThrow: Boolean = false
+) : PerfToolAdapter {
     override val name = "tulip"
-    override val profile = "http-get"
     override val supportedTestTypes = listOf(TestType.HTTP)
     override val version = "0.1.0"
     override val toolVersions = listOf("0.x")
@@ -108,16 +188,17 @@ class TestAdapter() : PerfToolAdapter {
     override fun validate(testPlan: TestPlan) = emptyList<ValidationError>()
 
     override fun run(testPlan: TestPlan): RunResult {
+        if (shouldThrow) throw RuntimeException("boom")
         Thread.sleep(100)
         return RunResult(
             tool = "tulip", testName = "test",
             timestamp = java.time.Instant.now().toString(),
             runId = java.util.UUID.randomUUID().toString(),
-            status = "completed",
-            summary = Summary(1, 100, 100.0, 0.0,
-                Latency(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)),
+            status = resultStatus,
+            summary = if (resultStatus == "completed") Summary(1, 100, 100.0, 0.0,
+                Latency(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)) else null,
             rawOutputPath = null,
-            metadata = emptyMap()
+            metadata = if (resultError != null) mapOf("error" to resultError) else emptyMap()
         )
     }
 }

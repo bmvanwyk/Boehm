@@ -222,6 +222,17 @@ class Store(private val dbPath: String) {
         }
     }
 
+    fun failInterruptedRuns(): Int {
+        val now = Instant.now().toString()
+        return conn.prepareStatement("""
+            UPDATE runs SET status = 'failed', error = 'interrupted: server restarted', completed_at = ?
+            WHERE status = 'running'
+        """).use { ps ->
+            ps.setString(1, now)
+            ps.executeUpdate()
+        }
+    }
+
     fun close() {
         _conn?.close()
         _conn = null

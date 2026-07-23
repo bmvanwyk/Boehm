@@ -118,4 +118,20 @@ class StoreTest {
         store.close()
         assertDoesNotThrow { store.close() }
     }
+
+    @Test
+    fun `failInterruptedRuns marks running runs as failed`() {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val scenarioId = store.insertScenario("tulip", "t1", """{"type":"http"}""")!!
+        val runId = store.insertRun(scenarioId, "tulip")!!
+        store.updateRunStatus(runId, "running")
+
+        val count = store.failInterruptedRuns()
+
+        assertEquals(1, count)
+        val run = store.getRun(runId)!!
+        assertEquals("failed", run.status)
+        assertTrue(run.error!!.contains("interrupted"))
+        assertNotNull(run.completedAt)
+    }
 }
