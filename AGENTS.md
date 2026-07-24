@@ -32,6 +32,12 @@ Designed but not yet implemented: Gatling, vegeta, wrk.
 | Persistence | SQLite (`~/.boehm/boehm.db`) |
 | Testing | JUnit 5 |
 
+## Toolchain
+
+- **Java, Kotlin, Gradle** managed via **sdkman**. Use `sdk install <candidate> <version>`, `sdk use`, `sdk default`.
+- Versions pinned in `.sdkmanrc` for `sdk env`.
+- Gradle wrapper always used (`./gradlew`), not system `gradle`.
+
 ## Architecture
 
 ```

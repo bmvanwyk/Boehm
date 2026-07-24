@@ -1,2 +1,3 @@
 # Enable auto-env with: sdk config auto_env true
-java=21.0.7-tem
+java=25.0.2-open
+kotlin=2.4.10
