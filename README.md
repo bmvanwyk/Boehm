@@ -9,6 +9,7 @@ Named after [Barry Boehm](https://en.wikipedia.org/wiki/Barry_Boehm).
 - **Java 21** — install via SDKMAN: `sdk install java 21.0.7-tem`
 - **Tulip CLI** (for Tulip adapter) — cloned to `~/git/Tulip`, built with `./gradlew build`
 - **JMeter** (for JMeter adapter) — install [Apache JMeter 5.6.3](https://jmeter.apache.org/download_jmeter.cgi), ensure `jmeter` is on PATH and `JAVA_HOME` is set
+- **k6** (for k6 adapter) — install via `brew install k6`, the [official deb repo](https://grafana.com/docs/k6/latest/set-up/install-k6/), or `go install go.k6.io/k6@latest`; ensure `k6` is on PATH
 
 ## Quick start
 
@@ -24,6 +25,9 @@ Named after [Barry Boehm](https://en.wikipedia.org/wiki/Barry_Boehm).
 
 # Run JMeter integration test (requires JMeter on PATH + JAVA_HOME set)
 ./gradlew test --tests "io.boehm.integration.JMeterIntegrationTest"
+
+# Run k6 integration test (requires k6 on PATH; skips gracefully if absent)
+./gradlew test --tests "io.boehm.integration.K6IntegrationTest"
 
 # Start the MCP server (stdio)
 ./gradlew run --args="--token=boehm_sk_$(openssl rand -hex 16)"
@@ -58,10 +62,12 @@ Boehm/
 │   │   ├── model/                 # TestPlan, RunResult, Summary, Latency
 │   │   ├── adapters/tulip/
 │   │   │   └── TulipParser.kt     # Native Tulip JSON → RunResult
-│   │   └── adapters/jmeter/
-│   │       └── JMeterParser.kt   # JMeter JTL CSV → RunResult
+│   │   ├── adapters/jmeter/
+│   │   │   └── JMeterParser.kt   # JMeter JTL CSV → RunResult
+│   │   └── adapters/k6/
+│   │       └── K6Parser.kt       # k6 NDJSON → RunResult
 │   └── test/
-│       ├── adapter/               # TulipAdapterTest, JMeterParserTest
+│       ├── adapter/               # TulipAdapterTest, JMeterParserTest, K6ParserTest
 │       ├── parser/                # TulipParserTest
 │       ├── auth/                  # AuthHandlerTest
 │       ├── core/                  # McpHandler, Orchestrator, Scheduler, Store
@@ -69,10 +75,12 @@ Boehm/
 │       │   ├── mock-tulip.sh      # Mock CLI for unit tests
 │       │   ├── run-real-tulip.sh  # Wrapper for integration test
 │       │   ├── tulip-sample-output.json
-│       │   └── jmeter-sample-output.csv
+│       │   ├── jmeter-sample-output.csv
+│       │   └── k6-sample-output.jsonl
 │       └── integration/
 │           ├── TulipIntegrationTest.kt
-│           └── JMeterIntegrationTest.kt
+│           ├── JMeterIntegrationTest.kt
+│           └── K6IntegrationTest.kt
 ```
 
 ## Using with opencode
@@ -113,7 +121,7 @@ use boehm to get the result for run <runId>
 | Tool | Profiles | Status |
 |------|----------|--------|
 | Tulip | `http-get`, `demo` | Implemented |
-| k6 | `http-get` | Designed (parser needed) |
+| k6 | `http-get` | Implemented |
 | JMeter | `http-get` | Implemented |
 | Gatling | `http-get` | Designed (parser needed) |
 | vegeta | `http-get` | Designed (parser needed) |

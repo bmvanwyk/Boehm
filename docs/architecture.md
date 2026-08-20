@@ -75,6 +75,7 @@ graph TB
         CatalogAdapter["CatalogAdapter.kt<br/>template + overrides + exec"]
         TulipParser["TulipParser.kt<br/>native JSON → RunResult"]
     JMeterParser["JMeterParser.kt<br/>JTL CSV → RunResult"]
+    K6Parser["K6Parser.kt<br/>k6 NDJSON → RunResult"]
     end
 
     subgraph "Catalog"
@@ -99,9 +100,11 @@ graph TB
     CatalogAdapter --> Templates
     CatalogAdapter --> TulipParser
     CatalogAdapter --> JMeterParser
+    CatalogAdapter --> K6Parser
     CatalogAdapter --> Models
     TulipParser --> Models
     JMeterParser --> Models
+    K6Parser --> Models
     Store --> SQLite[(SQLite)]
 ```
 

@@ -1,0 +1,104 @@
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:00Z", "value": 10, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:00Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:00Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:00Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:01Z", "value": 20, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:01Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:01Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:01Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:02Z", "value": 30, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:02Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:02Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:02Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:03Z", "value": 40, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:03Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:03Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:03Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:04Z", "value": 50, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:04Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:04Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:04Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:05Z", "value": 60, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:05Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:05Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:05Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:06Z", "value": 70, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:06Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:06Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:06Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:07Z", "value": 80, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:07Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:07Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:07Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:08Z", "value": 90, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:08Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:08Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:08Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:09Z", "value": 100, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:09Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:09Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:09Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:10Z", "value": 110, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:10Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:10Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:10Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:11Z", "value": 120, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:11Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:11Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:11Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:12Z", "value": 130, "tags": {"status": "500", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:12Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:12Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:12Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:13Z", "value": 140, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:13Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:13Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:13Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:14Z", "value": 150, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:14Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:14Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:14Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:15Z", "value": 160, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:15Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:15Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:15Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:16Z", "value": 170, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:16Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:16Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:16Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:17Z", "value": 180, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:17Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:17Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:17Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:18Z", "value": 190, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:18Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:18Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:18Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:19Z", "value": 200, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:19Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:19Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:19Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:20Z", "value": 210, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:20Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:20Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:20Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:21Z", "value": 220, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:21Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:21Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:21Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:22Z", "value": 230, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:22Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:22Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:22Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:23Z", "value": 240, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:23Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:23Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:23Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"time": "2026-08-20T10:00:24Z", "value": 250, "tags": {"status": "200", "method": "GET", "url": "https://httpbin.org/get", "name": ""}}}
+{"type": "Metric", "metric": "http_reqs", "data": {"time": "2026-08-20T10:00:24Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "iterations", "data": {"time": "2026-08-20T10:00:24Z", "value": 1, "tags": {}}}
+{"type": "Metric", "metric": "vus", "data": {"time": "2026-08-20T10:00:24Z", "value": 5, "tags": {}}}
+{"type": "Metric", "metric": "http_req_duration", "data": {"type": "Point", "contains": "value", "thresholds": {}}}
+{"type": "Group", "data": {"id": "g0", "name": ""}, "group": {"path": "", "name": ""}}
+"this is a malformed line that should be skipped"
+"{not valid json"
