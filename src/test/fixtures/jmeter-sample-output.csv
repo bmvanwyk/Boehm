@@ -1,0 +1,21 @@
+timeStamp,elapsed,label,responseCode,responseMessage,threadName,success,failureMessage,bytes,sentBytes,grpHits,Latency,Connect,1-1,allThreads,URL,IdleTime,SampleCount,ErrorCount
+1721452000000,210,HTTP Request,200,OK,Thread Group 1-1,true,,742,128,1,180,15,1,10,https://httpbin.org/get,0,1,0
+1721452000100,185,HTTP Request,200,OK,Thread Group 1-1,true,,738,128,2,160,12,1,10,https://httpbin.org/get,0,1,0
+1721452000200,320,HTTP Request,200,OK,Thread Group 1-1,true,,750,128,3,290,18,1,10,https://httpbin.org/get,0,1,0
+1721452000300,175,HTTP Request,200,OK,Thread Group 1-1,true,,735,128,4,150,10,1,10,https://httpbin.org/get,0,1,0
+1721452000400,450,HTTP Request,200,OK,Thread Group 1-1,true,,760,128,5,420,22,1,10,https://httpbin.org/get,0,1,0
+1721452000500,198,HTTP Request,200,OK,Thread Group 1-1,true,,741,128,6,170,14,1,10,https://httpbin.org/get,0,1,0
+1721452000600,210,HTTP Request,200,OK,Thread Group 1-1,true,,742,128,7,180,15,1,10,https://httpbin.org/get,0,1,0
+1721452000700,350,HTTP Request,200,OK,Thread Group 1-1,true,,755,128,8,320,20,1,10,https://httpbin.org/get,0,1,0
+1721452000800,150,HTTP Request,200,OK,Thread Group 1-1,true,,730,128,9,130,8,1,10,https://httpbin.org/get,0,1,0
+1721452000900,220,HTTP Request,200,OK,Thread Group 1-1,true,,743,128,10,190,16,1,10,https://httpbin.org/get,0,1,0
+1721452001000,500,HTTP Request,200,OK,Thread Group 1-1,true,,770,128,11,470,25,1,10,https://httpbin.org/get,0,1,0
+1721452001100,190,HTTP Request,200,OK,Thread Group 1-1,true,,739,128,12,165,12,1,10,https://httpbin.org/get,0,1,0
+1721452001200,310,HTTP Request,200,OK,Thread Group 1-1,true,,750,128,13,280,18,1,10,https://httpbin.org/get,0,1,0
+1721452001300,175,HTTP Request,200,OK,Thread Group 1-1,true,,735,128,14,150,10,1,10,https://httpbin.org/get,0,1,0
+1721452001400,400,HTTP Request,500,Internal Server Error,Thread Group 1-1,false,Assertion failure,700,128,15,370,20,1,10,https://httpbin.org/get,0,1,1
+1721452001500,185,HTTP Request,200,OK,Thread Group 1-1,true,,738,128,16,160,12,1,10,https://httpbin.org/get,0,1,0
+1721452001600,225,HTTP Request,200,OK,Thread Group 1-1,true,,744,128,17,195,16,1,10,https://httpbin.org/get,0,1,0
+1721452001700,340,HTTP Request,200,OK,Thread Group 1-1,true,,752,128,18,310,19,1,10,https://httpbin.org/get,0,1,0
+1721452001800,165,HTTP Request,200,OK,Thread Group 1-1,true,,734,128,19,145,10,1,10,https://httpbin.org/get,0,1,0
+1721452001900,280,HTTP Request,200,OK,Thread Group 1-1,true,,748,128,20,250,17,1,10,https://httpbin.org/get,0,1,0

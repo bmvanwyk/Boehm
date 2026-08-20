@@ -1,6 +1,7 @@
 package io.boehm
 
 import io.boehm.adapters.PerfToolAdapter
+import io.boehm.adapters.jmeter.JMeterParser
 import io.boehm.adapters.tulip.TulipParser
 import io.boehm.auth.AuthHandler
 import io.boehm.catalog.CatalogAdapter
@@ -27,7 +28,8 @@ fun main(args: Array<String>) {
 
     // Build parser registry
     val parsers: Map<String, (String) -> RunResult> = mapOf(
-        "tulip-results" to { raw -> TulipParser.parse(raw) }
+        "tulip-results" to { raw -> TulipParser.parse(raw) },
+        "jmeter-csv" to { raw -> JMeterParser.parse(raw) }
     )
 
     // Load catalog and create adapters

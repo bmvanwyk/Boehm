@@ -52,17 +52,20 @@ Boehm/
 │   │   │   ├── Scheduler.kt       # Serial run queue
 │   │   │   └── Store.kt           # SQLite (adapters, runs, schemas)
 │   │   ├── model/                 # TestPlan, RunResult, Summary, Latency
-│   │   └── adapters/tulip/
-│   │       └── TulipParser.kt     # Native Tulip JSON → RunResult
+│   │   ├── adapters/tulip/
+│   │   │   └── TulipParser.kt     # Native Tulip JSON → RunResult
+│   │   └── adapters/jmeter/
+│   │       └── JMeterParser.kt   # JMeter JTL CSV → RunResult
 │   └── test/
-│       ├── adapter/               # TulipAdapterTest (via CatalogAdapter)
+│       ├── adapter/               # TulipAdapterTest, JMeterParserTest
 │       ├── parser/                # TulipParserTest
 │       ├── auth/                  # AuthHandlerTest
 │       ├── core/                  # McpHandler, Orchestrator, Scheduler, Store
 │       ├── fixtures/
 │       │   ├── mock-tulip.sh      # Mock CLI for unit tests
 │       │   ├── run-real-tulip.sh  # Wrapper for integration test
-│       │   └── tulip-sample-output.json
+│       │   ├── tulip-sample-output.json
+│       │   └── jmeter-sample-output.csv
 │       └── integration/
 │           └── TulipIntegrationTest.kt
 ```
@@ -105,7 +108,7 @@ use boehm to get the result for run <runId>
 |------|----------|--------|
 | Tulip | `http-get`, `demo` | Implemented |
 | k6 | `http-get` | Designed (parser needed) |
-| JMeter | `http-get` | Designed (parser needed) |
+| JMeter | `http-get` | Implemented |
 | Gatling | `http-get` | Designed (parser needed) |
 | vegeta | `http-get` | Designed (parser needed) |
 | wrk | `http-get` | Designed (parser needed) |
