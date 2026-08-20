@@ -28,6 +28,7 @@
           <stringProp name="HTTPSampler.method">GET</stringProp>
           <stringProp name="HTTPSampler.domain">${__P(target_url,httpbin.org)}</stringProp>
           <stringProp name="HTTPSampler.port">443</stringProp>
+          <stringProp name="HTTPSampler.protocol">https</stringProp>
           <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
         </HTTPSamplerProxy>
         <hashTree/>
