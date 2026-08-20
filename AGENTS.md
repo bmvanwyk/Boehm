@@ -18,8 +18,9 @@ Read the design spec before changing behaviour.
 |------|--------|------------|------------------|
 | Tulip | `TulipParser` (JSON) | `http-get`, `demo` | `TulipIntegrationTest` |
 | JMeter | `JMeterParser` (JTL CSV) | `http-get` | `JMeterIntegrationTest` |
+| k6 | `K6Parser` (NDJSON) | `http-get` | `K6IntegrationTest` |
 
-Designed but not yet implemented: k6, Gatling, vegeta, wrk.
+Designed but not yet implemented: Gatling, vegeta, wrk.
 
 ## Stack
 
