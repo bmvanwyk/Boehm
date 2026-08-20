@@ -74,6 +74,7 @@ graph TB
         CatalogLoader["CatalogLoader.kt<br/>parse catalog.yaml"]
         CatalogAdapter["CatalogAdapter.kt<br/>template + overrides + exec"]
         TulipParser["TulipParser.kt<br/>native JSON → RunResult"]
+    JMeterParser["JMeterParser.kt<br/>JTL CSV → RunResult"]
     end
 
     subgraph "Catalog"
@@ -97,8 +98,10 @@ graph TB
     CatalogAdapter --> CatalogLoader
     CatalogAdapter --> Templates
     CatalogAdapter --> TulipParser
+    CatalogAdapter --> JMeterParser
     CatalogAdapter --> Models
     TulipParser --> Models
+    JMeterParser --> Models
     Store --> SQLite[(SQLite)]
 ```
 
@@ -312,12 +315,15 @@ Boehm/
 │   │   │   └── ProgressEvent.kt     # Progress, events, enums
 │   │   └── adapters/
 │   │       ├── PerfToolAdapter.kt   # Interface all adapters implement
-│   │       └── tulip/
-│   │           └── TulipParser.kt   # Parse Tulip JSON → RunResult
+│   │       ├── tulip/
+│   │       │   └── TulipParser.kt   # Parse Tulip JSON → RunResult
+│   │       └── jmeter/
+│   │           └── JMeterParser.kt  # Parse JMeter JTL CSV → RunResult
 │   └── test/kotlin/io/boehm/
 │       ├── adapter/
 │       │   ├── TulipAdapterTest.kt  # Tests CatalogAdapter via tulip profile
-│       │   └── TulipParserTest.kt
+│       │   ├── TulipParserTest.kt
+│       │   └── JMeterParserTest.kt
 │       ├── auth/
 │       │   └── AuthHandlerTest.kt
 │       ├── core/
@@ -330,9 +336,11 @@ Boehm/
 │       ├── fixtures/
 │       │   ├── mock-tulip.sh
 │       │   ├── run-real-tulip.sh
-│       │   └── tulip-sample-output.json
+│       │   ├── tulip-sample-output.json
+│       │   └── jmeter-sample-output.csv
 │       └── integration/
-│           └── TulipIntegrationTest.kt
+│           ├── TulipIntegrationTest.kt
+│           └── JMeterIntegrationTest.kt
 ```
 
 ---

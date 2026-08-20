@@ -12,6 +12,15 @@
 
 Read the design spec before changing behaviour.
 
+## Implemented Adapters
+
+| Tool | Parser | Profile(s) | Integration Test |
+|------|--------|------------|------------------|
+| Tulip | `TulipParser` (JSON) | `http-get`, `demo` | `TulipIntegrationTest` |
+| JMeter | `JMeterParser` (JTL CSV) | `http-get` | `JMeterIntegrationTest` |
+
+Designed but not yet implemented: k6, Gatling, vegeta, wrk.
+
 ## Stack
 
 | Component | Choice |

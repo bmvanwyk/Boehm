@@ -8,6 +8,7 @@ Named after [Barry Boehm](https://en.wikipedia.org/wiki/Barry_Boehm).
 
 - **Java 21** — install via SDKMAN: `sdk install java 21.0.7-tem`
 - **Tulip CLI** (for Tulip adapter) — cloned to `~/git/Tulip`, built with `./gradlew build`
+- **JMeter** (for JMeter adapter) — install [Apache JMeter 5.6.3](https://jmeter.apache.org/download_jmeter.cgi), ensure `jmeter` is on PATH and `JAVA_HOME` is set
 
 ## Quick start
 
@@ -20,6 +21,9 @@ Named after [Barry Boehm](https://en.wikipedia.org/wiki/Barry_Boehm).
 
 # Run integration test (requires ~/git/Tulip with Tulip built)
 ./gradlew test --tests "io.boehm.integration.TulipIntegrationTest"
+
+# Run JMeter integration test (requires JMeter on PATH + JAVA_HOME set)
+./gradlew test --tests "io.boehm.integration.JMeterIntegrationTest"
 
 # Start the MCP server (stdio)
 ./gradlew run --args="--token=boehm_sk_$(openssl rand -hex 16)"
@@ -67,7 +71,8 @@ Boehm/
 │       │   ├── tulip-sample-output.json
 │       │   └── jmeter-sample-output.csv
 │       └── integration/
-│           └── TulipIntegrationTest.kt
+│           ├── TulipIntegrationTest.kt
+│           └── JMeterIntegrationTest.kt
 ```
 
 ## Using with opencode
@@ -77,6 +82,7 @@ The `.opencode/opencode.jsonc` config registers Boehm as an MCP server. Restart 
 ```
 use boehm to list adapters
 use boehm to queue a test named demo with tool tulip profile http-get against https://httpbin.org/get at 50 req/s for 30s
+use boehm to queue a test named http-get with tool jmeter profile http-get against httpbin.org with 10 threads for 30s
 use boehm to check server status
 use boehm to get the result for run <runId>
 ```
