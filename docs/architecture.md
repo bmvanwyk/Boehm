@@ -59,7 +59,8 @@ graph TB
 ```mermaid
 graph TB
     subgraph "Protocol Layer"
-        McpHandler["McpHandler.kt<br/>stdio JSON-RPC loop + dispatch"]
+        McpServer["McpServer (MCP Kotlin SDK)<br/>initialize, tools/list, tools/call"]
+        BoehmToolHandlers["BoehmToolHandlers.kt<br/>5 tool handlers"]
         AuthHandler["AuthHandler.kt<br/>validate token per session"]
     end
 
@@ -87,12 +88,13 @@ graph TB
         Models["TestPlan, RunResult, ProgressEvent, Summary, Latency"]
     end
 
-    Agent["AI Agent"]
+    Agent["AI Agent (MCP client)"]
 
     CatalogLoader --> CatalogYaml
-    Agent --> McpHandler
-    McpHandler --> AuthHandler
-    McpHandler --> Orchestrator
+    Agent --> McpServer
+    McpServer --> BoehmToolHandlers
+    BoehmToolHandlers --> AuthHandler
+    BoehmToolHandlers --> Orchestrator
     Orchestrator --> Scheduler
     Orchestrator --> Store
     Scheduler --> CatalogAdapter
@@ -308,7 +310,7 @@ Boehm/
 │   │   │   ├── CatalogLoader.kt     # Parse catalog.yaml
 │   │   │   └── CatalogAdapter.kt    # Generic PerfToolAdapter
 │   │   ├── core/
-│   │   │   ├── McpHandler.kt        # JSON-RPC message dispatcher
+│   │   │   ├── BoehmToolHandlers.kt  # 5 MCP tool handlers (suspend funs)
 │   │   │   ├── Orchestrator.kt      # Test plan routing, run lifecycle
 │   │   │   ├── Scheduler.kt         # Serial run queue
 │   │   │   └── Store.kt             # SQLite operations
@@ -330,7 +332,7 @@ Boehm/
 │       ├── auth/
 │       │   └── AuthHandlerTest.kt
 │       ├── core/
-│       │   ├── McpHandlerTest.kt
+│       │   ├── BoehmServerTest.kt
 │       │   ├── OrchestratorTest.kt
 │       │   ├── SchedulerTest.kt
 │       │   └── StoreTest.kt

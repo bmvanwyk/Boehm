@@ -48,7 +48,7 @@ class K6IntegrationTest {
                         schema = "k6-jsonl"
                     ),
                     overrides = mapOf(
-                        "target_url" to OverrideDef(path = null, default = "https://httpbin.org/get"),
+                        "target_url" to OverrideDef(path = null, default = "https://httpbingo.org/get"),
                         "rate_per_sec" to OverrideDef(path = null, default = "50"),
                         "duration_sec" to OverrideDef(path = null, default = "30")
                     )
@@ -65,7 +65,7 @@ class K6IntegrationTest {
         val plan = TestPlan(
             type = "http",
             profile = "http-get",
-            targetUrl = "https://httpbin.org/get",
+            targetUrl = "https://httpbingo.org/get",
             ratePerSec = 20,
             durationSec = 12,
             warmupSec = 0,
@@ -78,8 +78,8 @@ class K6IntegrationTest {
         assertEquals("completed", result.status)
         assertNotNull(result.summary, "summary should not be null, error: ${result.metadata["error"]}")
         assertTrue(result.summary!!.totalRequests > 0, "should have requests")
-        // httpbin/get always returns 200, so no client-side failed requests.
-        assertEquals(0.0, result.summary!!.errorRatePct, 0.001, "should have 0% errors against httpbin")
+        // httpbingo.org/get always returns 200, so no client-side failed requests.
+        assertEquals(0.0, result.summary!!.errorRatePct, 0.001, "should have 0% errors against httpbingo.org")
         assertTrue(result.summary!!.latency.p50Ms > 0, "p50 should be positive")
 
         if (result.rawOutputPath != null) {

@@ -153,10 +153,11 @@ class Store(private val dbPath: String) {
     }
 
     fun updateRunStatus(runId: String, status: String, summary: String? = null,
-                        error: String? = null, rawOutputPath: String? = null) {
+                        error: String? = null, rawOutputPath: String? = null,
+                        metadata: String? = null) {
         val now = Instant.now().toString()
         conn.prepareStatement("""
-            UPDATE runs SET status = ?, summary = ?, error = ?, raw_output_path = ?,
+            UPDATE runs SET status = ?, summary = ?, error = ?, raw_output_path = ?, metadata = ?,
                 started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN ? ELSE started_at END,
                 completed_at = CASE WHEN ? = 'completed' OR ? = 'failed' THEN ? ELSE completed_at END
             WHERE id = ?
@@ -165,9 +166,10 @@ class Store(private val dbPath: String) {
             ps.setString(2, summary)
             ps.setString(3, error)
             ps.setString(4, rawOutputPath)
-            ps.setString(5, status); ps.setString(6, now)
-            ps.setString(7, status); ps.setString(8, status); ps.setString(9, now)
-            ps.setString(10, runId)
+            ps.setString(5, metadata)
+            ps.setString(6, status); ps.setString(7, now)
+            ps.setString(8, status); ps.setString(9, status); ps.setString(10, now)
+            ps.setString(11, runId)
             ps.execute()
         }
     }

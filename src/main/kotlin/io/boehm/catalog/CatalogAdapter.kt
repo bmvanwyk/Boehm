@@ -22,6 +22,13 @@ class CatalogAdapter(
     override val version: String = "0.1.0"
 ) : PerfToolAdapter {
 
+    companion object {
+        // Allowed characters in a target_url override: alphanumerics, and a small
+        // set of safe URL punctuation. Everything else (shell metacharacters,
+        // whitespace, control chars) is rejected before it reaches the shell.
+        private val TARGET_URL_REGEX = Regex("^[a-zA-Z0-9._\\-:/]+$")
+    }
+
     override val profile: String get() = profileName
 
     private val profileDef: ProfileDef
@@ -163,7 +170,9 @@ class CatalogAdapter(
         val result = mutableMapOf<String, String>()
         for ((name, overrideDef) in profileDef.overrides) {
             if (overrideDef.default != null) {
-                result[name] = overrideDef.default.toString()
+                val def = overrideDef.default.toString()
+                sanitizeOverride(name, def)
+                result[name] = def
             }
         }
         val testPlanMap = mapOf(
@@ -174,15 +183,46 @@ class CatalogAdapter(
         )
         for ((name, value) in testPlanMap) {
             if (name in profileDef.overrides && value.isNotBlank()) {
+                sanitizeOverride(name, value)
                 result[name] = value
             }
         }
         for ((name, value) in testPlan.parameters) {
             if (name in profileDef.overrides) {
+                sanitizeOverride(name, value)
                 result[name] = value
             }
         }
         return result
+    }
+
+    private val SHELL_METACHAR_REGEX = Regex("[;|&`\$(){}<>\\n\\r]")
+
+    /**
+     * Reject override values that contain shell metacharacters or otherwise look
+     * like command injection. Numeric overrides are parsed as int; target_url is
+     * constrained to a safe URL/character set.
+     */
+    private fun sanitizeOverride(name: String, value: String) {
+        if (value.isEmpty()) return
+        if (SHELL_METACHAR_REGEX.containsMatchIn(value)) {
+            throw IllegalArgumentException(
+                "Invalid override '$name': value contains shell metacharacters: '$value'")
+        }
+        when (name) {
+            "target_url" -> {
+                if (!TARGET_URL_REGEX.matches(value)) {
+                    throw IllegalArgumentException(
+                        "Invalid override 'target_url': illegal characters in '$value'")
+                }
+            }
+            "rate_per_sec", "duration_sec", "warmup_sec", "timeout_sec", "threads", "connections" -> {
+                if (value.toIntOrNull() == null) {
+                    throw IllegalArgumentException(
+                        "Invalid override '$name': expected an integer, got '$value'")
+                }
+            }
+        }
     }
 
     private fun applyJsonOverrides(templateJson: String, profile: ProfileDef, overrides: Map<String, String>): String {

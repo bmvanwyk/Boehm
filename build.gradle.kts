@@ -1,5 +1,6 @@
 plugins {
-    kotlin("jvm") version "1.9.22"
+    kotlin("jvm") version "2.4.10"
+    kotlin("plugin.serialization") version "2.4.10"
     application
     jacoco
 }
@@ -20,6 +21,13 @@ dependencies {
     implementation("org.xerial:sqlite-jdbc:3.45.1.0")
     implementation("org.yaml:snakeyaml:2.2")
 
+    // MCP SDK (official Kotlin MCP server)
+    implementation("io.modelcontextprotocol:kotlin-sdk:0.15.0")
+    implementation("io.ktor:ktor-client-cio:3.5.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-io-core:0.9.1")
+
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
@@ -30,12 +38,6 @@ application {
 
 kotlin {
     jvmToolchain(21)
-}
-
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-    kotlinOptions {
-        jvmTarget = "21"
-    }
 }
 
 tasks.test {

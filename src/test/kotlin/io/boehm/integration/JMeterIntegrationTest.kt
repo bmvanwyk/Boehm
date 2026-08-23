@@ -45,7 +45,7 @@ class JMeterIntegrationTest {
                         schema = "jmeter-csv"
                     ),
                     overrides = mapOf(
-                        "target_url" to OverrideDef(path = null, default = "httpbin.org"),
+                        "target_url" to OverrideDef(path = null, default = "httpbingo.org"),
                         "threads" to OverrideDef(path = null, default = "5"),
                         "duration_sec" to OverrideDef(path = null, default = "10")
                     )
@@ -62,7 +62,7 @@ class JMeterIntegrationTest {
         val plan = TestPlan(
             type = "http",
             profile = "http-get",
-            targetUrl = "httpbin.org",
+            targetUrl = "httpbingo.org",
             ratePerSec = 5,
             durationSec = 10,
             warmupSec = 0,

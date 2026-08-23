@@ -57,8 +57,9 @@ class Scheduler(
 
             val summaryJson = if (result.summary != null) gson.toJson(result.summary) else null
             val error = if (result.status == "failed") result.metadata["error"]?.toString() else null
+            val metadataJson = if (result.metadata.isNotEmpty()) gson.toJson(result.metadata) else null
             store.updateRunStatus(pending.id, result.status, summary = summaryJson,
-                error = error, rawOutputPath = result.rawOutputPath)
+                error = error, rawOutputPath = result.rawOutputPath, metadata = metadataJson)
         } catch (e: Exception) {
             try {
                 store.updateRunStatus(pending.id, "failed",

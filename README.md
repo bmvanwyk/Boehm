@@ -55,7 +55,7 @@ Boehm/
 │   │   │   ├── CatalogLoader.kt   # Parse catalog.yaml → typed models
 │   │   │   └── CatalogAdapter.kt  # Generic PerfToolAdapter (catalog-driven)
 │   │   ├── core/
-│   │   │   ├── McpHandler.kt      # JSON-RPC dispatcher (5 tools)
+│   │   │   ├── BoehmToolHandlers.kt # 5 MCP tool handlers (suspend funs)
 │   │   │   ├── Orchestrator.kt    # Route test plans → adapters
 │   │   │   ├── Scheduler.kt       # Serial run queue
 │   │   │   └── Store.kt           # SQLite (adapters, runs, schemas)
@@ -70,7 +70,7 @@ Boehm/
 │       ├── adapter/               # TulipAdapterTest, JMeterParserTest, K6ParserTest
 │       ├── parser/                # TulipParserTest
 │       ├── auth/                  # AuthHandlerTest
-│       ├── core/                  # McpHandler, Orchestrator, Scheduler, Store
+│   │   ├── core/                  # BoehmToolHandlers, Orchestrator, Scheduler, Store
 │       ├── fixtures/
 │       │   ├── mock-tulip.sh      # Mock CLI for unit tests
 │       │   ├── run-real-tulip.sh  # Wrapper for integration test
@@ -107,12 +107,14 @@ use boehm to get the result for run <runId>
 
 ## How it works
 
-1. An agent sends `run_test` with a tool name, profile, and parameter overrides
-2. `McpHandler` parses the request and constructs a `TestPlan` with common fields + tool-specific `parameters`
+1. An agent sends `tools/call` (run_test) with a tool name, profile, and parameter overrides via the MCP protocol
+2. The official [MCP Kotlin SDK](https://github.com/modelcontextprotocol/kotlin-sdk) `Server` dispatches the call to `BoehmToolHandlers.runTest`, which constructs a `TestPlan`
 3. `Orchestrator` validates the plan and queues the run in SQLite (serial execution — one at a time for clean measurements)
 4. `CatalogAdapter` loads the profile template from `profiles/<tool>/`, applies overrides via JSON path (JSON-based tools) or env vars (script-based tools), shell-execs the CLI command, and captures output
 5. Results are parsed into a normalized `RunResult` and persisted in SQLite
 6. The agent polls `get_run` or `get_run_progress` until complete
+
+The MCP SDK handles the protocol layer: `initialize` handshake, `capabilities`, `tools/list` discovery, `notifications/initialized`, content envelopes, and JSON-RPC parsing — so Boehm is fully discoverable and standards-compliant for any MCP client (Claude Code, opencode, etc.).
 
 ## Test catalog
 

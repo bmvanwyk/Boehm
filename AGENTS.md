@@ -28,7 +28,7 @@ Designed but not yet implemented: Gatling, vegeta, wrk.
 |-----------|--------|
 | Language | Kotlin / JVM |
 | Build | Gradle (multi-module) |
-| MCP SDK | TBD |
+| MCP SDK | `io.modelcontextprotocol:kotlin-sdk:0.15.0` |
 | Persistence | SQLite (`~/.boehm/boehm.db`) |
 | Testing | JUnit 5 |
 
