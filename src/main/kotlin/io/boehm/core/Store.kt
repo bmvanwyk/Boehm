@@ -95,14 +95,17 @@ class Store(private val dbPath: String) {
 
     fun insertScenario(tool: String, name: String, testPlan: String): String? {
         val id = UUID.randomUUID().toString()
-        val rows = conn.prepareStatement("INSERT OR IGNORE INTO test_scenarios (id, tool, name, test_plan) VALUES (?, ?, ?, ?)").use { ps ->
+        conn.prepareStatement("""
+            INSERT INTO test_scenarios (id, tool, name, test_plan) VALUES (?, ?, ?, ?)
+            ON CONFLICT(tool, name) DO UPDATE SET test_plan = excluded.test_plan
+        """).use { ps ->
             ps.setString(1, id)
             ps.setString(2, tool)
             ps.setString(3, name)
             ps.setString(4, testPlan)
             ps.executeUpdate()
         }
-        return if (rows > 0) id else getScenario(tool, name)?.id
+        return getScenario(tool, name)?.id
     }
 
     fun getScenario(tool: String, name: String): ScenarioRow? {

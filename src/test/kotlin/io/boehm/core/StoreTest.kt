@@ -109,6 +109,22 @@ class StoreTest {
     }
 
     @Test
+    fun `insertScenario updates stored plan when resubmitted with different config`() {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val p1 = """{"type":"http","ratePerSec":100}"""
+        val p2 = """{"type":"http","ratePerSec":500}"""
+        val id1 = store.insertScenario("tulip", "test-1", p1)!!
+        val id2 = store.insertScenario("tulip", "test-1", p2)!!
+
+        // Same scenario identity (name-keyed), but the stored plan must reflect the latest submission
+        assertEquals(id1, id2)
+        assertTrue(
+            store.getScenarioById(id1)!!.testPlan.contains("500"),
+            "expected updated plan persisted, got: ${store.getScenarioById(id1)!!.testPlan}"
+        )
+    }
+
+    @Test
     fun `getScenarioById returns null for missing id`() {
         assertNull(store.getScenarioById("nonexistent"))
     }
