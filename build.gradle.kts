@@ -39,15 +39,12 @@ kotlin {
     jvmToolchain(25)
 }
 
-<<<<<<< HEAD
-=======
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
     }
 }
 
->>>>>>> abe1f40 (chore: upgrade toolchain — Gradle 9.5.0, Kotlin 2.4.10, JDK 25)
 tasks.test {
     useJUnitPlatform()
     testLogging {
