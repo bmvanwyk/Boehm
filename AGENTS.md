@@ -2,6 +2,16 @@
 
 **Performance Testing AI Engineer.** MCP server + agents + skills with history tracking, baseline comparison, statistical analysis, and git PR investigation. Named after Barry Boehm.
 
+## Implemented Capabilities
+
+- **Run history** (`list_runs`) — recent finished runs, filterable by tool/scenario
+- **Per-scenario baselines** (`tag_baseline`) — any completed run can be tagged as its scenario's baseline
+- **Baseline comparison** (`compare_runs`) — direction-aware deltas (throughput/latency/error rate) with regression/improvement flags beyond 10%
+- **Cancellation** (`cancel_run`) — queued runs are flipped to `cancelled`; running runs have their subprocess tree killed
+- **Real progress** (`get_run_progress`) — estimated from `started_at` and the plan's warmup/duration, not hardcoded values
+- **Timeout validation** — plans whose `timeout_sec` cannot cover `duration_sec + warmup_sec + slack` are rejected at submit time
+- **Measurement integrity** — resubmitting a scenario name updates its stored plan; ISO-8601 timestamps everywhere; Store access serialized behind one lock
+
 ## Key Documents
 
 | Document | Purpose |

@@ -93,6 +93,10 @@ use boehm to queue a test named demo with tool tulip profile http-get against ht
 use boehm to queue a test named http-get with tool jmeter profile http-get against httpbin.org with 10 threads for 30s
 use boehm to check server status
 use boehm to get the result for run <runId>
+use boehm to list recent runs
+use boehm to tag run <runId> as the baseline
+use boehm to compare run <runId> against the baseline
+use boehm to cancel run <runId>
 ```
 
 ### MCP tools
@@ -101,9 +105,17 @@ use boehm to get the result for run <runId>
 |------|-------|--------|
 | `list_adapters` | — | Available tools + supported profiles |
 | `run_test` | `tool`, `test_name`, `test_plan` (contains `type`, `profile`, `target_url`, `rate_per_sec`, `duration_sec`, `warmup_sec`, plus tool-specific params) | `runId`, status `queued` |
-| `get_run` | `run_id` | Full `RunResult` with latency, throughput, error rate |
-| `server_status` | — | Queue depth, currently running, uptime, registered adapters |
-| `get_run_progress` | `run_id` | Status, `progress_pct`, `current_stage`, `rolling_summary` |
+| `get_run` | `run_id` | Full result with latency (incl. mean/stdev), throughput, error rate |
+| `get_run_progress` | `run_id` | Status, real progress %, current stage, elapsed/remaining estimate |
+| `server_status` | — | Queue depth, currently running (+ progress), uptime, adapters |
+| `list_runs` | `tool?`, `test_name?`, `limit?` | Recent completed/failed/cancelled runs, newest first |
+| `tag_baseline` | `run_id` | Tags a completed run as its scenario's baseline |
+| `compare_runs` | `run_id`, `baseline_run_id?` | Per-metric deltas vs baseline with regression/improvement flags |
+| `cancel_run` | `run_id` | Cancels a queued/pending run or kills a running one |
+
+Adapters whose output schema has no parser yet (Gatling, vegeta, wrk) are not
+registered — they appear in `catalog.yaml` but not in `list_adapters` until a
+parser is implemented.
 
 ## How it works
 

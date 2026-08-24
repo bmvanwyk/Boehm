@@ -80,4 +80,24 @@ class OrchestratorTest {
         assertTrue(result is Orchestrator.SubmitResult.Queued)
         assertEquals(listOf("demo"), validatedBy)
     }
+
+    // ── cancelRun ────────────────────────────────────────────────────────
+
+    @Test
+    fun `cancelRun returns NotFound for unknown run`() {
+        val result = orchestrator.cancelRun("no-such-run")
+        assertTrue(result is Orchestrator.CancelResult.NotFound)
+    }
+
+    @Test
+    fun `cancelRun returns NotCancellable for already-finished run`() {
+        orchestrator.registerAdapter(mockAdapter("tulip", "http-get"))
+        val plan = TestPlan(type = "http", profile = "http-get", targetUrl = "https://example.com")
+        val queued = orchestrator.submitRun("tulip", "test-1", plan) as Orchestrator.SubmitResult.Queued
+        store.updateRunStatus(queued.runId, "completed")
+
+        val result = orchestrator.cancelRun(queued.runId)
+        assertTrue(result is Orchestrator.CancelResult.NotCancellable)
+        assertEquals("completed", (result as Orchestrator.CancelResult.NotCancellable).status)
+    }
 }

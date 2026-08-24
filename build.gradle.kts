@@ -62,4 +62,11 @@ tasks.jacocoTestReport {
         xml.required.set(true)
         html.required.set(true)
     }
+    // Main.kt is the stdio entry point (transport wiring); it is covered by
+    // integration usage, not unit tests. Everything else must meet the 80% bar.
+    classDirectories.setFrom(
+        files(classDirectories.map { dir ->
+            fileTree(dir) { exclude("io/boehm/MainKt*") }
+        })
+    )
 }
