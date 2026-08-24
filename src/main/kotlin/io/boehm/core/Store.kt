@@ -96,13 +96,14 @@ class Store(private val dbPath: String) {
     fun insertScenario(tool: String, name: String, testPlan: String): String? {
         val id = UUID.randomUUID().toString()
         conn.prepareStatement("""
-            INSERT INTO test_scenarios (id, tool, name, test_plan) VALUES (?, ?, ?, ?)
+            INSERT INTO test_scenarios (id, tool, name, test_plan, created_at) VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(tool, name) DO UPDATE SET test_plan = excluded.test_plan
         """).use { ps ->
             ps.setString(1, id)
             ps.setString(2, tool)
             ps.setString(3, name)
             ps.setString(4, testPlan)
+            ps.setString(5, Instant.now().toString())
             ps.executeUpdate()
         }
         return getScenario(tool, name)?.id
@@ -131,10 +132,11 @@ class Store(private val dbPath: String) {
 
     fun insertRun(scenarioId: String, tool: String): String? {
         val id = UUID.randomUUID().toString()
-        conn.prepareStatement("INSERT INTO runs (id, scenario_id, tool) VALUES (?, ?, ?)").use { ps ->
+        conn.prepareStatement("INSERT INTO runs (id, scenario_id, tool, created_at) VALUES (?, ?, ?, ?)").use { ps ->
             ps.setString(1, id)
             ps.setString(2, scenarioId)
             ps.setString(3, tool)
+            ps.setString(4, Instant.now().toString())
             ps.execute()
         }
         return id

@@ -85,6 +85,32 @@ class StoreTest {
     }
 
     @Test
+    fun `scenario and run timestamps are ISO-8601 with Z suffix`() {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val sid = store.insertScenario("tulip", "ts-test", """{"type":"http"}""")!!
+        val rid = store.insertRun(sid, "tulip")!!
+
+        val scenario = store.getScenarioById(sid)!!
+        val run = store.getRun(rid)!!
+        assertTrue(scenario.createdAt.endsWith("Z") && scenario.createdAt.contains('T'),
+            "scenario created_at not ISO-8601: ${scenario.createdAt}")
+        assertTrue(run.createdAt.endsWith("Z") && run.createdAt.contains('T'),
+            "run created_at not ISO-8601: ${run.createdAt}")
+    }
+
+    @Test
+    fun `runs created later sort before earlier runs in listRuns DESC order`() {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val sid = store.insertScenario("tulip", "sort-test", """{"type":"http"}""")!!
+        val r1 = store.insertRun(sid, "tulip")!!
+        Thread.sleep(50)
+        val r2 = store.insertRun(sid, "tulip")!!
+        val runs = store.listRuns(sid)  // ORDER BY created_at DESC
+        assertEquals(r2, runs[0].id)
+        assertEquals(r1, runs[1].id)
+    }
+
+    @Test
     fun `getPendingOrRunningRun returns null when empty`() {
         assertNull(store.getPendingOrRunningRun())
     }
