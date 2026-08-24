@@ -30,6 +30,20 @@ class JMeterParserTest {
     }
 
     @Test
+    fun `latency includes mean and stdev`() {
+        val csv = """
+            timeStamp,elapsed,success,label
+            1700000000000,100,true,mean-test
+            1700000000100,200,true,mean-test
+            1700000000200,300,true,mean-test
+        """.trimIndent()
+        val result = JMeterParser.parse(csv)
+        assertEquals(200.0, result.summary!!.latency.meanMs, 0.001)
+        // population stdev of {100,200,300} ≈ 81.65
+        assertEquals(81.6497, result.summary!!.latency.stdevMs, 0.01)
+    }
+
+    @Test
     fun `parse computes correct latency percentiles`() {
         // 10 samples with elapsed: 100,200,300,...,1000
         val csv = "timeStamp,elapsed,success\n" +

@@ -4,6 +4,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.boehm.model.Latency
 import io.boehm.model.RunResult
+import io.boehm.model.Stats
 import io.boehm.model.Summary
 import java.time.Instant
 import java.util.UUID
@@ -133,7 +134,9 @@ object K6Parser {
             p90Ms = percentile(sorted, 90.0),
             p95Ms = percentile(sorted, 95.0),
             p99Ms = percentile(sorted, 99.0),
-            maxMs = sorted.last()
+            maxMs = sorted.last(),
+            meanMs = Stats.mean(durationValues),
+            stdevMs = Stats.stdev(durationValues)
         )
 
         val durationSec = if (timestamps.size >= 2) {

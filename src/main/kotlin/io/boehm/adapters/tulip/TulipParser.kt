@@ -85,6 +85,8 @@ object TulipParser {
 
         val minRt = if (result.has("min_rt")) result.get("min_rt").asDouble / NS_TO_MS else 0.0
         val maxRt = if (result.has("max_rt")) result.get("max_rt").asDouble / NS_TO_MS else 0.0
+        val meanRt = if (result.has("avg_rt")) result.get("avg_rt").asDouble / NS_TO_MS else 0.0
+        val sdRt = if (result.has("sd_rt")) result.get("sd_rt").asDouble / NS_TO_MS else 0.0
 
         return Latency(
             minMs = minRt,
@@ -92,7 +94,9 @@ object TulipParser {
             p90Ms = p90,
             p95Ms = p95,
             p99Ms = p99,
-            maxMs = maxRt
+            maxMs = maxRt,
+            meanMs = meanRt,
+            stdevMs = sdRt
         )
     }
 

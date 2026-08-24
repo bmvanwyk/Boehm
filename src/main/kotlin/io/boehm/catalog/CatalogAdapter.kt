@@ -40,10 +40,7 @@ class CatalogAdapter(
 
     override val name: String get() = toolDef.name
     override val supportedTestTypes: List<TestType>
-        get() = when {
-            toolDef.name == "tulip" -> listOf(TestType.HTTP)
-            else -> listOf(TestType.HTTP)
-        }
+        get() = listOf(TestType.HTTP)
     override val toolVersions: List<String>
         get() = listOf("0.x")
 

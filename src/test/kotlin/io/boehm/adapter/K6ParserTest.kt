@@ -138,4 +138,16 @@ class K6ParserTest {
         assertEquals(24, codes["200"])
         assertEquals(1, codes["500"])
     }
+
+    @Test
+    fun `latency includes mean and stdev`() {
+        val ndjson = listOf(
+            """{"metric":"http_req_duration","data":{"value":100.0,"time":"2026-01-01T00:00:00Z"}}""",
+            """{"metric":"http_req_duration","data":{"value":200.0,"time":"2026-01-01T00:00:01Z"}}""",
+            """{"metric":"http_req_duration","data":{"value":300.0,"time":"2026-01-01T00:00:02Z"}}"""
+        ).joinToString("\n")
+        val result = K6Parser.parse(ndjson)
+        assertEquals(200.0, result.summary!!.latency.meanMs, 0.001)
+        assertEquals(81.6497, result.summary!!.latency.stdevMs, 0.01)
+    }
 }

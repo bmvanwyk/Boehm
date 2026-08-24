@@ -2,6 +2,7 @@ package io.boehm.adapters.jmeter
 
 import io.boehm.model.Latency
 import io.boehm.model.RunResult
+import io.boehm.model.Stats
 import io.boehm.model.Summary
 import java.time.Instant
 import java.util.UUID
@@ -41,7 +42,6 @@ object JMeterParser {
         val latencyCol = colIndex["Latency"]
         val labelCol = colIndex["label"]
         val responseCodeCol = colIndex["responseCode"]
-        val connectCol = colIndex["Connect"]
 
         val elapsedValues = mutableListOf<Double>()
         val latencyValues = mutableListOf<Double>()
@@ -101,10 +101,6 @@ object JMeterParser {
         metadata["jmeter"] = true
         metadata["samples"] = totalRequests
         metadata["failed"] = failedRequests
-        if (connectCol != null) {
-            val avgConnect = timestamps.zip(elapsedValues).mapNotNull { (_, _) -> 0.0 }.let { 0.0 }
-            metadata["avg_connect_ms"] = avgConnect
-        }
         if (responseCodes.isNotEmpty()) metadata["response_codes"] = responseCodes
         if (latencyCol != null && latencyValues.isNotEmpty()) {
             metadata["avg_latency_ms"] = latencyValues.average()
@@ -145,7 +141,9 @@ object JMeterParser {
             p90Ms = percentile(sorted, 90.0),
             p95Ms = percentile(sorted, 95.0),
             p99Ms = percentile(sorted, 99.0),
-            maxMs = sorted.last()
+            maxMs = sorted.last(),
+            meanMs = Stats.mean(elapsed),
+            stdevMs = Stats.stdev(elapsed)
         )
     }
 

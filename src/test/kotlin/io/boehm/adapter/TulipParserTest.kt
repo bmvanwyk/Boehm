@@ -96,4 +96,16 @@ class TulipParserTest {
         assertNotNull(result.metadata["tulip_version"])
         assertNotNull(result.metadata["hdr_histogram"])
     }
+
+    @Test
+    fun `latency includes mean and stdev from avg_rt and sd_rt`() {
+        val json = """
+            {"results":[{"bm_name":"bm","duration":10,"num_actions":100,"num_failed":0,"avg_aps":10.0,
+              "min_rt":1000000.0,"max_rt":5000000.0,"avg_rt":2500000.0,"sd_rt":500000.0,
+              "percentiles_rt":{"50.0":2400000.0}}]}
+        """.trimIndent()
+        val result = TulipParser.parse(json)
+        assertEquals(2.5, result.summary!!.latency.meanMs, 0.0001)
+        assertEquals(0.5, result.summary!!.latency.stdevMs, 0.0001)
+    }
 }

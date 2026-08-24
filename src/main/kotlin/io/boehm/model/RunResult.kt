@@ -25,5 +25,7 @@ data class Latency(
     val p90Ms: Double,
     val p95Ms: Double,
     val p99Ms: Double,
-    val maxMs: Double
+    val maxMs: Double,
+    val meanMs: Double = 0.0,
+    val stdevMs: Double = 0.0
 )
