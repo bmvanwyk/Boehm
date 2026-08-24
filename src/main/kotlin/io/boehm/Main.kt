@@ -4,8 +4,8 @@ import io.boehm.adapters.PerfToolAdapter
 import io.boehm.adapters.jmeter.JMeterParser
 import io.boehm.adapters.k6.K6Parser
 import io.boehm.adapters.tulip.TulipParser
-import io.boehm.catalog.CatalogAdapter
 import io.boehm.catalog.CatalogLoader
+import io.boehm.catalog.buildAdapters
 import io.boehm.core.BoehmToolHandlers
 import io.boehm.core.Orchestrator
 import io.boehm.core.Store
@@ -53,13 +53,9 @@ fun main(args: Array<String>) {
         "k6-jsonl" to { raw -> K6Parser.parse(raw) }
     )
 
-    // Load catalog and create adapters
+    // Load catalog and create adapters (only profiles whose output schema has a parser)
     val catalog = CatalogLoader(catalogPath).load()
-    val adapters: List<PerfToolAdapter> = catalog.tools.flatMap { (name, toolDef) ->
-        toolDef.profiles.keys.map { profileName ->
-            CatalogAdapter(toolDef, profileName, baseDir, parsers)
-        }
-    }
+    val adapters = buildAdapters(catalog, baseDir, parsers)
 
     // Pre-register adapters in store so list_adapters works immediately
     adapters.forEach { adapter ->
