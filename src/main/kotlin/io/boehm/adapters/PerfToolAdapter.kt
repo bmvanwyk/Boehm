@@ -1,6 +1,7 @@
 package io.boehm.adapters
 
 import io.boehm.model.*
+import java.lang.Process
 
 interface PerfToolAdapter {
     val name: String
@@ -11,4 +12,11 @@ interface PerfToolAdapter {
 
     fun validate(testPlan: TestPlan): List<ValidationError>
     fun run(testPlan: TestPlan): RunResult
+
+    /**
+     * Runs the plan. Implementations that spawn a subprocess must invoke
+     * [onProcessStart] once the process exists so the caller can cancel it.
+     * Default implementation ignores the listener (in-memory adapters).
+     */
+    fun run(testPlan: TestPlan, onProcessStart: (Process) -> Unit): RunResult = run(testPlan)
 }

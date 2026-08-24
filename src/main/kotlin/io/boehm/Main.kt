@@ -182,5 +182,16 @@ fun buildServer(handlers: BoehmToolHandlers): Server {
         )
     ) { request: CallToolRequest -> handlers.compareRuns(request) }
 
+    server.addTool(
+        name = "cancel_run",
+        description = "Cancel a pending or running performance test run",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("run_id") { put("type", "string") }
+            },
+            required = listOf("run_id")
+        )
+    ) { request: CallToolRequest -> handlers.cancelRun(request) }
+
     return server
 }

@@ -172,13 +172,54 @@ class SchedulerTest {
         assertEquals("kaboom", run!!.error)
         scheduler.stop()
     }
+
+    // ── cancellation ─────────────────────────────────────────────────────
+
+    @Test
+    fun `cancel queued run prevents execution`() {
+        val slow = TestAdapter(sleepMs = 400)
+        scheduler = Scheduler(store, listOf(slow))
+        scheduler.start()
+
+        val s1 = store.insertScenario("tulip", "q1", """{"type":"http","profile":"http-get"}""")!!
+        val s2 = store.insertScenario("tulip", "q2", """{"type":"http","profile":"demo"}""")!!
+        val r1 = store.insertRun(s1, "tulip")!!
+        val r2 = store.insertRun(s2, "tulip")!!
+        store.updateRunStatus(r1, "queued")
+        store.updateRunStatus(r2, "queued")
+
+        assertTrue(scheduler.requestCancel(r2))
+
+        waitForStatus(r1, "completed", 5)
+        Thread.sleep(600)  // give the scheduler a poll cycle to prove it never ran r2
+        assertEquals("cancelled", store.getRun(r2)!!.status)
+        scheduler.stop()
+    }
+
+    @Test
+    fun `cancel running run kills work and records cancelled`() {
+        val slow = TestAdapter(sleepMs = 3000)
+        scheduler = Scheduler(store, listOf(slow))
+        scheduler.start()
+
+        val s1 = store.insertScenario("tulip", "r1", """{"type":"http","profile":"http-get"}""")!!
+        val r1 = store.insertRun(s1, "tulip")!!
+        store.updateRunStatus(r1, "queued")
+
+        waitForStatus(r1, "running", 5)
+        assertTrue(scheduler.requestCancel(r1))
+        val run = waitForStatus(r1, "cancelled", 10)
+        assertEquals("cancelled", run!!.status)
+        scheduler.stop()
+    }
 }
 
 class TestAdapter(
     override val profile: String = "http-get",
     private val resultStatus: String = "completed",
     private val resultError: String? = null,
-    private val shouldThrow: Boolean = false
+    private val shouldThrow: Boolean = false,
+    private val sleepMs: Long = 100
 ) : PerfToolAdapter {
     override val name = "tulip"
     override val supportedTestTypes = listOf(TestType.HTTP)
@@ -187,9 +228,12 @@ class TestAdapter(
 
     override fun validate(testPlan: TestPlan) = emptyList<ValidationError>()
 
-    override fun run(testPlan: TestPlan): RunResult {
+    override fun run(testPlan: TestPlan): RunResult =
+        run(testPlan) { /* no process to report in mock */ }
+
+    override fun run(testPlan: TestPlan, onProcessStart: (Process) -> Unit): RunResult {
         if (shouldThrow) throw RuntimeException("boom")
-        Thread.sleep(100)
+        Thread.sleep(sleepMs)
         return RunResult(
             tool = "tulip", testName = "test",
             timestamp = java.time.Instant.now().toString(),

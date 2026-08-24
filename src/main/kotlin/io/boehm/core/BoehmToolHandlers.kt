@@ -267,6 +267,20 @@ class BoehmToolHandlers(
         ))
     }
 
+    // ── cancel_run ───────────────────────────────────────────────────────
+
+    suspend fun cancelRun(request: CallToolRequest): CallToolResult {
+        val runId = argString(request, "run_id") ?: return errorResult(-32001, "Missing run_id")
+        return when (val result = orchestrator.cancelRun(runId)) {
+            is Orchestrator.CancelResult.Cancelled ->
+                textResult(mapOf("runId" to runId, "status" to "cancelling"))
+            is Orchestrator.CancelResult.NotFound ->
+                errorResult(-32002, "Run not found: ${result.runId}")
+            is Orchestrator.CancelResult.NotCancellable ->
+                errorResult(-32003, "Run ${result.runId} cannot be cancelled (status=${result.status})")
+        }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private fun textResult(payload: Map<String, Any?>): CallToolResult =

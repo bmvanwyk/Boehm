@@ -74,7 +74,9 @@ class CatalogAdapter(
         return errors
     }
 
-    override fun run(testPlan: TestPlan): RunResult {
+    override fun run(testPlan: TestPlan): RunResult = run(testPlan) { /* no listener */ }
+
+    override fun run(testPlan: TestPlan, onProcessStart: (java.lang.Process) -> Unit): RunResult {
         val overrides = resolveOverrides(testPlan)
 
         val outputDir = File(System.getProperty("user.home"), ".boehm/outputs/${toolDef.name}")
@@ -132,6 +134,7 @@ class CatalogAdapter(
         val process = ProcessBuilder("bash", "-c", command)
             .redirectErrorStream(true)
             .start()
+        onProcessStart(process)
         val stdoutFuture = CompletableFuture.supplyAsync {
             process.inputStream.bufferedReader().readText()
         }

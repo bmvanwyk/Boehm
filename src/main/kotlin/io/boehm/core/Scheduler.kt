@@ -5,6 +5,7 @@ import io.boehm.adapters.PerfToolAdapter
 import io.boehm.model.TestPlan
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class Scheduler(
     private val store: Store,
@@ -16,6 +17,12 @@ class Scheduler(
     private val gson = Gson()
     private val adapterMap = adapters.associateBy { "${it.name}:${it.profile}" }
     private var running = false
+
+    // Cancellation state. activeRunId/activeProcess are written by the scheduler
+    // thread and read/written by MCP threads via requestCancel — hence atomics.
+    private val activeRunId = AtomicReference<String?>(null)
+    private val activeProcess = AtomicReference<Process?>(null)
+    private val cancelRequested: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     fun start() {
         if (running) return
@@ -30,6 +37,25 @@ class Scheduler(
     fun stop() {
         running = false
         executor.shutdown()
+    }
+
+    /**
+     * Cancel a run. Queued/pending runs are flipped to 'cancelled' directly;
+     * the currently-running run has its subprocess killed and will be recorded
+     * as 'cancelled' when the adapter call returns.
+     */
+    fun requestCancel(runId: String): Boolean {
+        val run = store.getRun(runId) ?: return false
+        return when (run.status) {
+            "pending", "queued" -> store.cancelQueuedRun(runId)
+            "running" -> {
+                if (runId != activeRunId.get()) return false
+                cancelRequested.add(runId)
+                activeProcess.get()?.destroyForcibly()
+                true
+            }
+            else -> false
+        }
     }
 
     private fun pollQueue() {
@@ -53,12 +79,19 @@ class Scheduler(
             }
 
             store.updateRunStatus(pending.id, "running")
-            val result = adapter.run(testPlan)
+            activeRunId.set(pending.id)
+            val result = try {
+                adapter.run(testPlan) { p -> activeProcess.set(p) }
+            } finally {
+                activeProcess.set(null)
+                activeRunId.set(null)
+            }
 
             val summaryJson = if (result.summary != null) gson.toJson(result.summary) else null
             val error = if (result.status == "failed") result.metadata["error"]?.toString() else null
             val metadataJson = if (result.metadata.isNotEmpty()) gson.toJson(result.metadata) else null
-            store.updateRunStatus(pending.id, result.status, summary = summaryJson,
+            val finalStatus = if (cancelRequested.remove(pending.id)) "cancelled" else result.status
+            store.updateRunStatus(pending.id, finalStatus, summary = summaryJson,
                 error = error, rawOutputPath = result.rawOutputPath, metadata = metadataJson)
         } catch (e: Exception) {
             try {

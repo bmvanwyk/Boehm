@@ -14,6 +14,12 @@ class Orchestrator(private val store: Store) {
         data class Invalid(val errors: List<ValidationError>) : SubmitResult()
     }
 
+    sealed class CancelResult {
+        data class Cancelled(val runId: String) : CancelResult()
+        data class NotFound(val runId: String) : CancelResult()
+        data class NotCancellable(val runId: String, val status: String) : CancelResult()
+    }
+
     private val gson = Gson()
     private var scheduler: Scheduler? = null
     private val adapters = mutableMapOf<String, PerfToolAdapter>() // key: "tool:profile"
@@ -42,11 +48,25 @@ class Orchestrator(private val store: Store) {
             ?: return SubmitResult.Invalid(listOf(ValidationError("run", "could not persist run")))
         store.updateRunStatus(runId, "queued")
 
+        ensureScheduler()
+
+        return SubmitResult.Queued(runId)
+    }
+
+    fun cancelRun(runId: String): CancelResult {
+        val run = store.getRun(runId) ?: return CancelResult.NotFound(runId)
+        if (run.status !in listOf("pending", "queued", "running")) {
+            return CancelResult.NotCancellable(runId, run.status)
+        }
+        ensureScheduler()
+        val ok = scheduler!!.requestCancel(runId)
+        return if (ok) CancelResult.Cancelled(runId) else CancelResult.NotCancellable(runId, run.status)
+    }
+
+    private fun ensureScheduler() {
         if (scheduler == null) {
             scheduler = Scheduler(store, adapters.values.toList())
             scheduler!!.start()
         }
-
-        return SubmitResult.Queued(runId)
     }
 }
