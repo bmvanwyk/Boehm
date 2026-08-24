@@ -397,4 +397,44 @@ class BoehmServerTest {
         assertTrue(err.isError ?: false)
         assertTrue(contentText(err).contains("not taggable"))
     }
+
+    // ── compare_runs ────────────────────────────────────────────────────
+
+    @Test
+    fun `compare_runs uses tagged baseline and reports deltas`() = runBlocking {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val sid = store.insertScenario("tulip", "cmp", """{"type":"http"}""")!!
+        val baseRun = store.insertRun(sid, "tulip")!!
+        val newRun = store.insertRun(sid, "tulip")!!
+        val baseSummary = ("{\"durationSec\":30,\"totalRequests\":1500,\"throughputReqPerSec\":50.0," +
+            "\"errorRatePct\":0.0,\"latency\":{\"minMs\":1.0,\"p50Ms\":10.0,\"p90Ms\":20.0," +
+            "\"p95Ms\":20.0,\"p99Ms\":40.0,\"maxMs\":50.0,\"meanMs\":15.0,\"stdevMs\":4.0}}")
+        val newSummary = baseSummary.replace("\"throughputReqPerSec\":50.0", "\"throughputReqPerSec\":25.0")
+        store.updateRunStatus(baseRun, "completed", summary = baseSummary)
+        store.updateRunStatus(newRun, "completed", summary = newSummary)
+        store.setBaseline(sid, baseRun)
+
+        val json = gson.fromJson(contentText(handlers.compareRuns(request(
+            buildJsonObject { put("run_id", newRun) }))), Map::class.java)
+
+        assertEquals(newRun, json["runId"])
+        assertEquals(baseRun, json["baselineRunId"])
+        @Suppress("UNCHECKED_CAST")
+        val metrics = json["metrics"] as Map<String, Map<String, Any?>>
+        assertEquals(-50.0, metrics["throughputReqPerSec"]!!["deltaPct"] as Double, 0.001)
+        assertTrue((json["regressions"] as List<*>).contains("throughputReqPerSec"))
+    }
+
+    @Test
+    fun `compare_runs without baseline returns actionable error`() = runBlocking {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val sid = store.insertScenario("tulip", "cmp2", """{"type":"http"}""")!!
+        val run = store.insertRun(sid, "tulip")!!
+        store.updateRunStatus(run, "completed", summary = """{"durationSec":1,"totalRequests":1,
+            "throughputReqPerSec":1.0,"errorRatePct":0.0,"latency":{"minMs":1.0,"p50Ms":1.0,
+            "p90Ms":1.0,"p95Ms":1.0,"p99Ms":1.0,"maxMs":1.0}}""".replace("\n", ""))
+        val err = handlers.compareRuns(request(buildJsonObject { put("run_id", run) }))
+        assertTrue(err.isError ?: false)
+        assertTrue(contentText(err).contains("No baseline"))
+    }
 }

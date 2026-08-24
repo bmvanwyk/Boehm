@@ -170,5 +170,17 @@ fun buildServer(handlers: BoehmToolHandlers): Server {
         )
     ) { request: CallToolRequest -> handlers.tagBaseline(request) }
 
+    server.addTool(
+        name = "compare_runs",
+        description = "Compare a run against the scenario's tagged baseline (or an explicit baseline_run_id). Reports per-metric deltas with regression/improvement flags",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("run_id") { put("type", "string") }
+                putJsonObject("baseline_run_id") { put("type", "string"); put("description", "Override the tagged baseline") }
+            },
+            required = listOf("run_id")
+        )
+    ) { request: CallToolRequest -> handlers.compareRuns(request) }
+
     return server
 }

@@ -227,6 +227,46 @@ class BoehmToolHandlers(
         ))
     }
 
+    // ── compare_runs ─────────────────────────────────────────────────────
+
+    private fun parseSummary(json: String): io.boehm.model.Summary? = try {
+        gson.fromJson(json, io.boehm.model.Summary::class.java)
+    } catch (_: Exception) { null }
+
+    suspend fun compareRuns(request: CallToolRequest): CallToolResult {
+        val runId = argString(request, "run_id") ?: return errorResult(-32001, "Missing run_id")
+        val run = store.getRun(runId) ?: return errorResult(-32002, "Run not found: $runId")
+        val runSummary = run.summary?.let { parseSummary(it) }
+            ?: return errorResult(-32003, "Run $runId has no summary (status=${run.status})")
+
+        val baselineRunId = argString(request, "baseline_run_id")
+            ?: store.getBaselineRunId(run.scenarioId)
+            ?: return errorResult(
+                -32004,
+                "No baseline tagged for this scenario; pass baseline_run_id or call tag_baseline first"
+            )
+        val baseline = store.getRun(baselineRunId)
+            ?: return errorResult(-32002, "Baseline run not found: $baselineRunId")
+        val baselineSummary = baseline.summary?.let { parseSummary(it) }
+            ?: return errorResult(-32003, "Baseline run $baselineRunId has no summary (status=${baseline.status})")
+
+        val comparison = Comparator.compare(runSummary, baselineSummary)
+        return textResult(mapOf(
+            "runId" to run.id,
+            "baselineRunId" to baseline.id,
+            "metrics" to comparison.metrics.mapValues { (_, d) ->
+                mapOf(
+                    "baseline" to d.baseline,
+                    "run" to d.run,
+                    "deltaPct" to d.deltaPct,
+                    "verdict" to d.verdict
+                )
+            },
+            "regressions" to comparison.regressions,
+            "improvements" to comparison.improvements
+        ))
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private fun textResult(payload: Map<String, Any?>): CallToolResult =
