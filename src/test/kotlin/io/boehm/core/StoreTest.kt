@@ -156,6 +156,55 @@ class StoreTest {
     }
 
     @Test
+    fun `setBaseline replaces previous baseline for scenario`() {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val sid = store.insertScenario("tulip", "b-test", """{"type":"http"}""")!!
+        val r1 = store.insertRun(sid, "tulip")!!
+        val r2 = store.insertRun(sid, "tulip")!!
+
+        store.setBaseline(sid, r1)
+        assertEquals(r1, store.getBaselineRunId(sid))
+        store.setBaseline(sid, r2)
+        assertEquals(r2, store.getBaselineRunId(sid))
+    }
+
+    @Test
+    fun `getBaselineRunId returns null when unset`() {
+        assertNull(store.getBaselineRunId("no-such-scenario"))
+    }
+
+    @Test
+    fun `listRecentRuns filters by tool testName and limits`() {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        store.insertAdapter("k6", """["http"]""", "0.1.0", """["0.x"]""")
+        val s1 = store.insertScenario("tulip", "alpha", """{"type":"http"}""")!!
+        val s2 = store.insertScenario("k6", "beta", """{"type":"http"}""")!!
+        store.updateRunStatus(store.insertRun(s1, "tulip")!!, "completed")
+        store.updateRunStatus(store.insertRun(s2, "k6")!!, "completed")
+        store.updateRunStatus(store.insertRun(s2, "k6")!!, "completed")
+
+        assertEquals(3, store.listRecentRuns(null, null, 10).size)
+        assertEquals(1, store.listRecentRuns("tulip", null, 10).size)
+        assertEquals(2, store.listRecentRuns(null, "beta", 10).size)
+        assertEquals(1, store.listRecentRuns(null, null, 1).size)
+    }
+
+    @Test
+    fun `cancelQueuedRun cancels only non-started runs`() {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val sid = store.insertScenario("tulip", "c-test", """{"type":"http"}""")!!
+        val queued = store.insertRun(sid, "tulip")!!
+        store.updateRunStatus(queued, "queued")
+        val running = store.insertRun(sid, "tulip")!!
+        store.updateRunStatus(running, "running")
+
+        assertTrue(store.cancelQueuedRun(queued))
+        assertEquals("cancelled", store.getRun(queued)!!.status)
+        assertFalse(store.cancelQueuedRun(running))   // already started — scheduler handles it
+        assertFalse(store.cancelQueuedRun("no-such-run"))
+    }
+
+    @Test
     fun `close does not throw`() {
         store.close()
         assertDoesNotThrow { store.close() }

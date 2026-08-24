@@ -68,6 +68,13 @@ class Store(private val dbPath: String) {
                     applied_at TEXT NOT NULL DEFAULT (datetime('now'))
                 )
             """)
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS baselines (
+                    scenario_id TEXT PRIMARY KEY REFERENCES test_scenarios(id),
+                    run_id TEXT NOT NULL REFERENCES runs(id),
+                    tagged_at TEXT NOT NULL
+                )
+            """)
         }
     }
 
@@ -261,6 +268,73 @@ class Store(private val dbPath: String) {
             """).use { ps ->
                 ps.setString(1, now)
                 ps.executeUpdate()
+            }
+        }
+    }
+
+    fun setBaseline(scenarioId: String, runId: String) {
+        synchronized(lock) {
+            conn.prepareStatement("""
+                INSERT INTO baselines (scenario_id, run_id, tagged_at) VALUES (?, ?, ?)
+                ON CONFLICT(scenario_id) DO UPDATE SET run_id = excluded.run_id, tagged_at = excluded.tagged_at
+            """).use { ps ->
+                ps.setString(1, scenarioId)
+                ps.setString(2, runId)
+                ps.setString(3, Instant.now().toString())
+                ps.execute()
+            }
+        }
+    }
+
+    fun getBaselineRunId(scenarioId: String): String? {
+        synchronized(lock) {
+            conn.prepareStatement("SELECT run_id FROM baselines WHERE scenario_id = ?").use { ps ->
+                ps.setString(1, scenarioId)
+                ps.executeQuery().use { rs ->
+                    return if (rs.next()) rs.getString("run_id") else null
+                }
+            }
+        }
+    }
+
+    /** Recently finished runs, newest first. In-flight runs are excluded. */
+    fun listRecentRuns(tool: String?, testName: String?, limit: Int): List<RunRow> {
+        synchronized(lock) {
+            conn.prepareStatement("""
+                SELECT r.* FROM runs r JOIN test_scenarios s ON r.scenario_id = s.id
+                WHERE (? IS NULL OR r.tool = ?) AND (? IS NULL OR s.name = ?)
+                  AND r.status IN ('completed', 'failed', 'cancelled')
+                ORDER BY r.created_at DESC LIMIT ?
+            """).use { ps ->
+                ps.setString(1, tool); ps.setString(2, tool)
+                ps.setString(3, testName); ps.setString(4, testName)
+                ps.setInt(5, limit)
+                ps.executeQuery().use { rs ->
+                    val result = mutableListOf<RunRow>()
+                    while (rs.next()) {
+                        result.add(RunRow(
+                            rs.getString("id"), rs.getString("scenario_id"), rs.getString("tool"),
+                            rs.getString("status"), rs.getString("created_at"),
+                            rs.getString("started_at"), rs.getString("completed_at"),
+                            rs.getString("error"), rs.getString("summary"),
+                            rs.getString("raw_output_path"), rs.getString("metadata")))
+                    }
+                    return result
+                }
+            }
+        }
+    }
+
+    /** Cancels a run that has not started yet. Returns true if the status changed. */
+    fun cancelQueuedRun(runId: String): Boolean {
+        synchronized(lock) {
+            conn.prepareStatement("""
+                UPDATE runs SET status = 'cancelled', completed_at = ?
+                WHERE id = ? AND status IN ('pending', 'queued')
+            """).use { ps ->
+                ps.setString(1, Instant.now().toString())
+                ps.setString(2, runId)
+                return ps.executeUpdate() > 0
             }
         }
     }
