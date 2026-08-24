@@ -27,6 +27,9 @@ class CatalogAdapter(
         // set of safe URL punctuation. Everything else (shell metacharacters,
         // whitespace, control chars) is rejected before it reaches the shell.
         private val TARGET_URL_REGEX = Regex("^[a-zA-Z0-9._\\-:/]+$")
+
+        // Process timeout must cover the whole test plus teardown slack.
+        private const val TIMEOUT_SLACK_SEC = 10
     }
 
     override val profile: String get() = profileName
@@ -58,6 +61,18 @@ class CatalogAdapter(
         }
         if (testPlan.ratePerSec <= 0 && profileDef.overrides.containsKey("rate_per_sec")) {
             errors.add(ValidationError("ratePerSec", "must be > 0"))
+        }
+        if (profileDef.overrides.containsKey("duration_sec")) {
+            val minTimeout = testPlan.durationSec + testPlan.warmupSec + TIMEOUT_SLACK_SEC
+            if (testPlan.timeoutSec < minTimeout) {
+                errors.add(
+                    ValidationError(
+                        "timeoutSec",
+                        "must be >= duration_sec + warmup_sec + $TIMEOUT_SLACK_SEC " +
+                            "(got ${testPlan.timeoutSec}, need >= $minTimeout); otherwise the run would be killed mid-test"
+                    )
+                )
+            }
         }
         return errors
     }
