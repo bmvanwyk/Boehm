@@ -147,5 +147,28 @@ fun buildServer(handlers: BoehmToolHandlers): Server {
         )
     ) { request: CallToolRequest -> handlers.getRunProgress(request) }
 
+    server.addTool(
+        name = "list_runs",
+        description = "List recent performance test runs (optionally filtered by tool and test name), newest first, with summaries",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("tool") { put("type", "string"); put("description", "Filter by tool name") }
+                putJsonObject("test_name") { put("type", "string"); put("description", "Filter by scenario name") }
+                putJsonObject("limit") { put("type", "integer"); put("description", "Max runs to return (default 20)") }
+            }
+        )
+    ) { request: CallToolRequest -> handlers.listRuns(request) }
+
+    server.addTool(
+        name = "tag_baseline",
+        description = "Tag a completed run as the comparison baseline for its scenario (replaces any previous baseline)",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("run_id") { put("type", "string") }
+            },
+            required = listOf("run_id")
+        )
+    ) { request: CallToolRequest -> handlers.tagBaseline(request) }
+
     return server
 }

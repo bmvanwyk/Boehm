@@ -358,4 +358,43 @@ class BoehmServerTest {
             buildJsonObject { put("run_id", runId) }))), Map::class.java)
         assertEquals(100.0, json["progressPct"])
     }
+
+    // ── list_runs / tag_baseline ────────────────────────────────────────
+
+    @Test
+    fun `list_runs returns completed runs with summary briefs`() = runBlocking {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val sid = store.insertScenario("tulip", "hist", """{"type":"http"}""")!!
+        val rid = store.insertRun(sid, "tulip")!!
+        store.updateRunStatus(rid, "completed",
+            summary = """{"totalRequests":100,"throughputReqPerSec":33.5,"errorRatePct":0.5}""")
+
+        val json = gson.fromJson(contentText(handlers.listRuns(request(
+            buildJsonObject { put("limit", 10) }))), Map::class.java)
+        @Suppress("UNCHECKED_CAST")
+        val runs = json["runs"] as List<Map<String, Any?>>
+        assertEquals(1, runs.size)
+        assertEquals(rid, runs[0]["runId"])
+        assertEquals("completed", runs[0]["status"])
+        assertEquals("hist", runs[0]["testName"])
+        assertNotNull(runs[0]["summary"])
+    }
+
+    @Test
+    fun `tag_baseline tags completed run and rejects failed run`() = runBlocking {
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val sid = store.insertScenario("tulip", "base", """{"type":"http"}""")!!
+        val ok = store.insertRun(sid, "tulip")!!
+        val bad = store.insertRun(sid, "tulip")!!
+        store.updateRunStatus(ok, "completed", summary = "{}")
+        store.updateRunStatus(bad, "failed", error = "boom")
+
+        val good = gson.fromJson(contentText(handlers.tagBaseline(request(
+            buildJsonObject { put("run_id", ok) }))), Map::class.java)
+        assertEquals(true, good["taggedAsBaseline"])
+
+        val err = handlers.tagBaseline(request(buildJsonObject { put("run_id", bad) }))
+        assertTrue(err.isError ?: false)
+        assertTrue(contentText(err).contains("not taggable"))
+    }
 }

@@ -186,6 +186,47 @@ class BoehmToolHandlers(
         ))
     }
 
+    // ── list_runs ────────────────────────────────────────────────────────
+
+    suspend fun listRuns(request: CallToolRequest): CallToolResult {
+        val tool = argString(request, "tool")
+        val testName = argString(request, "test_name")
+        val limit = request.arguments?.get("limit")?.let {
+            (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull()
+        } ?: 20
+
+        val runs = store.listRecentRuns(tool, testName, limit.coerceIn(1, 100)).map { run ->
+            mapOf(
+                "runId" to run.id,
+                "tool" to run.tool,
+                "testName" to (store.getScenarioById(run.scenarioId)?.name ?: ""),
+                "status" to run.status,
+                "createdAt" to run.createdAt,
+                "summary" to (if (run.summary != null) parseJson(run.summary) else null)
+            )
+        }
+        return textResult(mapOf("runs" to runs))
+    }
+
+    // ── tag_baseline ─────────────────────────────────────────────────────
+
+    suspend fun tagBaseline(request: CallToolRequest): CallToolResult {
+        val runId = argString(request, "run_id") ?: return errorResult(-32001, "Missing run_id")
+        val run = store.getRun(runId) ?: return errorResult(-32002, "Run not found: $runId")
+        if (run.status != "completed" || run.summary == null) {
+            return errorResult(
+                -32003,
+                "Run $runId is not taggable as baseline (status=${run.status}; needs a completed run with a summary)"
+            )
+        }
+        store.setBaseline(run.scenarioId, run.id)
+        return textResult(mapOf(
+            "runId" to run.id,
+            "scenarioId" to run.scenarioId,
+            "taggedAsBaseline" to true
+        ))
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private fun textResult(payload: Map<String, Any?>): CallToolResult =
