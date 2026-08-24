@@ -311,5 +311,51 @@ class BoehmServerTest {
         val method = adapter.javaClass.getDeclaredMethod("resolveOverrides", TestPlan::class.java)
         method.isAccessible = true
         assertDoesNotThrow { method.invoke(adapter, plan) }
+
+    }
+
+    // ── get_run_progress (real estimation) ──────────────────────────────
+
+    @Test
+    fun `get_run_progress reports estimated progress for running run`() = runBlocking {
+        registerTulipHttpGet()
+        val args = buildJsonObject {
+            put("tool", "tulip"); put("test_name", "prog-test")
+            putJsonObject("test_plan") {
+                put("type", "http"); put("profile", "http-get")
+                put("target_url", "https://example.com")
+                put("duration_sec", 100); put("warmup_sec", 50); put("timeout_sec", 200)
+            }
+        }
+        val queued = gson.fromJson(contentText(handlers.runTest(request(args))), Map::class.java)
+        val runId = queued["runId"] as String
+        store.updateRunStatus(runId, "running")  // sets started_at = now
+
+        val json = gson.fromJson(contentText(handlers.getRunProgress(request(
+            buildJsonObject { put("run_id", runId) }))), Map::class.java)
+
+        assertEquals("running", json["status"])
+        @Suppress("UNCHECKED_CAST")
+        val pct = json["progressPct"] as Double
+        assertTrue(pct in 0.0..1.0, "just-started run should be ~0%, got $pct")
+        assertEquals("warmup", json["currentStage"])  // warmup=50s, elapsed≈0
+    }
+
+    @Test
+    fun `get_run_progress reports completed at 100 pct`() = runBlocking {
+        registerTulipHttpGet()
+        val args = buildJsonObject {
+            put("tool", "tulip"); put("test_name", "prog-done")
+            putJsonObject("test_plan") {
+                put("type", "http"); put("profile", "http-get"); put("target_url", "https://example.com")
+            }
+        }
+        val queued = gson.fromJson(contentText(handlers.runTest(request(args))), Map::class.java)
+        val runId = queued["runId"] as String
+        store.updateRunStatus(runId, "completed")
+
+        val json = gson.fromJson(contentText(handlers.getRunProgress(request(
+            buildJsonObject { put("run_id", runId) }))), Map::class.java)
+        assertEquals(100.0, json["progressPct"])
     }
 }

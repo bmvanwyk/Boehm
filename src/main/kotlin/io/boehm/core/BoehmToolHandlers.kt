@@ -6,6 +6,8 @@ import io.boehm.model.TestPlan
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import java.time.Duration
+import java.time.Instant
 import kotlinx.serialization.json.JsonObject as KxJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -108,14 +110,15 @@ class BoehmToolHandlers(
         val queuedRuns = store.getQueuedRuns()
 
         val currentlyRunning = if (runningRun != null && runningRun.status == "running") {
+            val est = estimateProgress(runningRun)
             mapOf(
                 "runId" to runningRun.id,
                 "tool" to runningRun.tool,
                 "testName" to (store.getScenarioById(runningRun.scenarioId)?.name ?: ""),
-                "progressPct" to 0.0,
-                "currentStage" to "running",
-                "elapsedSec" to 0,
-                "estimatedRemainingSec" to 0
+                "progressPct" to est.pct,
+                "currentStage" to est.stage,
+                "elapsedSec" to est.elapsedSec,
+                "estimatedRemainingSec" to est.remainingSec
             )
         } else null
 
@@ -141,21 +144,44 @@ class BoehmToolHandlers(
 
     // ── get_run_progress ─────────────────────────────────────────────────
 
+    private data class ProgressEstimate(val pct: Double, val stage: String, val elapsedSec: Long, val remainingSec: Long)
+
+    private fun estimateProgress(run: RunRow): ProgressEstimate {
+        if (run.status == "completed") return ProgressEstimate(100.0, "completed", 0, 0)
+        if (run.status != "running") return ProgressEstimate(0.0, run.status, 0, 0)
+
+        val startedAt = run.startedAt?.let {
+            try { Instant.parse(it) } catch (_: Exception) { null }
+        } ?: return ProgressEstimate(0.0, "running", 0, 0)
+
+        val elapsed = Duration.between(startedAt, Instant.now()).seconds
+        val scenario = store.getScenarioById(run.scenarioId)
+        val plan = scenario?.let {
+            try { gson.fromJson(it.testPlan, JsonObject::class.java) } catch (_: Exception) { null }
+        }
+        // TestPlan is serialized with Gson using its Kotlin property names
+        val warmup = plan?.optInt("warmupSec") ?: 0
+        val duration = plan?.optInt("durationSec") ?: 0
+        val total = (warmup + duration).coerceAtLeast(1)
+
+        val pct = (elapsed.toDouble() / total * 100.0).coerceIn(0.0, 99.0)
+        val stage = if (elapsed < warmup) "warmup" else "measuring"
+        return ProgressEstimate(pct, stage, elapsed, (total - elapsed).coerceAtLeast(0))
+    }
+
     suspend fun getRunProgress(request: CallToolRequest): CallToolResult {
         val runId = argString(request, "run_id") ?: return errorResult(-32001, "Missing run_id")
         val run = store.getRun(runId) ?: return errorResult(-32002, "Run not found: $runId")
 
+        val est = estimateProgress(run)
         val summary = if (run.summary != null) parseJson(run.summary) else null
         return textResult(mapOf(
             "runId" to run.id,
             "status" to run.status,
-            "progressPct" to (if (run.status == "completed") 100.0
-                else if (run.status == "running") 50.0 else 0.0),
-            "currentStage" to (if (run.status == "running") "running" else run.status),
-            "stageProgress" to mapOf(
-                "warmup" to mapOf("status" to "completed"),
-                "running" to mapOf("status" to (if (run.status == "running") "in_progress" else "completed"))
-            ),
+            "progressPct" to est.pct,
+            "currentStage" to est.stage,
+            "elapsedSec" to est.elapsedSec,
+            "estimatedRemainingSec" to est.remainingSec,
             "rollingSummary" to summary
         ))
     }
