@@ -49,13 +49,12 @@ Boehm/
 ├── src/
 │   ├── main/kotlin/io/boehm/
 │   │   ├── Main.kt                # stdio entry point, catalog loader
-│   │   ├── auth/AuthHandler.kt    # SHA-256 bearer token
 │   │   ├── catalog/
 │   │   │   ├── CatalogModels.kt   # Data classes for catalog.yaml
 │   │   │   ├── CatalogLoader.kt   # Parse catalog.yaml → typed models
 │   │   │   └── CatalogAdapter.kt  # Generic PerfToolAdapter (catalog-driven)
 │   │   ├── core/
-│   │   │   ├── BoehmToolHandlers.kt # 5 MCP tool handlers (suspend funs)
+│   │   │   ├── BoehmToolHandlers.kt # 9 MCP tool handlers (suspend funs)
 │   │   │   ├── Orchestrator.kt    # Route test plans → adapters
 │   │   │   ├── Scheduler.kt       # Serial run queue
 │   │   │   └── Store.kt           # SQLite (adapters, runs, schemas)
@@ -67,10 +66,9 @@ Boehm/
 │   │   └── adapters/k6/
 │   │       └── K6Parser.kt       # k6 NDJSON → RunResult
 │   └── test/
-│       ├── adapter/               # TulipAdapterTest, JMeterParserTest, K6ParserTest
-│       ├── parser/                # TulipParserTest
-│       ├── auth/                  # AuthHandlerTest
-│   │   ├── core/                  # BoehmToolHandlers, Orchestrator, Scheduler, Store
+│       ├── adapter/               # TulipAdapterTest, JMeterParserTest, K6ParserTest, TulipParserTest
+│   │   ├── catalog/               # AdapterBuilder, CatalogLoader tests
+│   │   ├── core/                  # BoehmToolHandlers (BoehmServerTest), Comparator, Orchestrator, Scheduler, Store
 │       ├── fixtures/
 │       │   ├── mock-tulip.sh      # Mock CLI for unit tests
 │       │   ├── run-real-tulip.sh  # Wrapper for integration test

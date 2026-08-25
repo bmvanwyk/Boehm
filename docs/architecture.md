@@ -24,7 +24,7 @@ graph TB
     SQLite[(SQLite<br/>~/.boehm/boehm.db)]
     OutputDir[(Raw Outputs<br/>~/.boehm/outputs/)]
 
-    Agent -- "JSON-RPC 2.0 over stdio<br/>bearer token auth" --> Boehm
+    Agent -- "JSON-RPC 2.0 over stdio<br/>startup token (transport trust)" --> Boehm
     Boehm -- "spawn + capture" --> Tulip
     Tulip -- "HTTP load" --> Target
     Boehm -- "persist runs, progress, metadata" --> SQLite
@@ -48,9 +48,9 @@ graph TB
    - No other layer should need to know about Tulip-specific stdout formats.
 
 4. Phase 1 should be opinionated and boring.
-   - One adapter: Tulip.
+   - One adapter mechanism: catalog-driven `CatalogAdapter`.
    - One execution policy: serial execution.
-   - One auth model: connection-scoped bearer token.
+   - One auth model: token required at startup; transport trust delegated to the spawner.
 
 ---
 
@@ -60,8 +60,7 @@ graph TB
 graph TB
     subgraph "Protocol Layer"
         McpServer["McpServer (MCP Kotlin SDK)<br/>initialize, tools/list, tools/call"]
-        BoehmToolHandlers["BoehmToolHandlers.kt<br/>5 tool handlers"]
-        AuthHandler["AuthHandler.kt<br/>validate token per session"]
+        BoehmToolHandlers["BoehmToolHandlers.kt<br/>9 tool handlers"]
     end
 
     subgraph "Application Layer"
@@ -93,7 +92,6 @@ graph TB
     CatalogLoader --> CatalogYaml
     Agent --> McpServer
     McpServer --> BoehmToolHandlers
-    BoehmToolHandlers --> AuthHandler
     BoehmToolHandlers --> Orchestrator
     Orchestrator --> Scheduler
     Orchestrator --> Store
@@ -120,17 +118,10 @@ graph TB
 sequenceDiagram
     participant Agent
     participant McpServer
-    participant AuthGuard
 
-    Agent->>McpServer: initialize { auth_token }
-    McpServer->>AuthGuard: validate(token)
-    alt invalid or missing
-        AuthGuard-->>McpServer: reject
-        McpServer-->>Agent: error -32005
-    else valid
-        AuthGuard-->>McpServer: allow session
-        McpServer-->>Agent: initialized
-    end
+    Note over McpServer: Server starts only with --token=<token> or BOEHM_TOKEN set.
+    Agent->>McpServer: initialize
+    McpServer-->>Agent: initialized
 ```
 
 ### run_test
@@ -174,6 +165,34 @@ sequenceDiagram
     McpServer-->>Agent: result
 ```
 
+### History, baselines, comparison, cancellation
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant McpServer
+    participant Handlers
+    participant Store
+
+    Agent->>McpServer: tools/call list_runs { tool?, test_name?, limit? }
+    McpServer->>Store: finished runs, newest first
+    Agent->>McpServer: tools/call tag_baseline { run_id }
+    McpServer->>Store: UPSERT baselines(scenario_id -> run_id)
+    Agent->>McpServer: tools/call compare_runs { run_id, baseline_run_id? }
+    McpServer->>Handlers: Comparator.compare(run, baseline)
+    McpServer-->>Agent: per-metric deltas + regression/improvement flags
+    Agent->>McpServer: tools/call cancel_run { run_id }
+    alt queued/pending
+        McpServer->>Store: status = cancelled (never executes)
+    else running
+        McpServer->>Store: kill subprocess tree; status = cancelled on return
+    end
+```
+
+`compare_runs` is direction-aware: higher throughput is an improvement,
+higher latency/error-rate a regression. Deltas beyond 10% are flagged.
+Latency metrics include mean and stdev in every parser summary.
+
 ---
 
 ## State Model
@@ -183,22 +202,24 @@ The run lifecycle should be explicit and durable:
 ```text
 pending -> queued -> running -> completed
                   \-> failed
+                  \-> cancelled
 ```
 
-Persisted fields for each run should include:
+Persisted fields for each run include:
 
 - `id`
 - `scenario_id` or equivalent name
 - `tool`
 - `status`
-- `created_at`, `started_at`, `completed_at`
-- `current_stage`
-- `progress_pct`
-- `progress_json` (latest snapshot)
+- `created_at`, `started_at`, `completed_at` (ISO-8601 everywhere, so lexicographic ordering works)
 - `summary`
 - `error`
 - `raw_output_path`
 - `metadata`
+
+Progress (`progress_pct`, current stage, elapsed/remaining) is computed at query
+time from `started_at` and the scenario's stored plan (warmup + duration), not
+stored as a snapshot — so it stays accurate without background writers.
 
 This is important because the server is stdio-based and may be restarted. A run should not depend on in-memory objects alone.
 
@@ -231,8 +252,18 @@ interface PerfToolAdapter {
 
     fun validate(testPlan: TestPlan): List<ValidationError>
     fun run(testPlan: TestPlan): RunResult
+
+    /**
+     * Runs the plan. Implementations that spawn a subprocess must invoke
+     * [onProcessStart] once the process exists so the caller can cancel it.
+     */
+    fun run(testPlan: TestPlan, onProcessStart: (Process) -> Unit): RunResult = run(testPlan)
 }
 ```
+
+Only catalog profiles whose output schema has a registered parser get an
+adapter instance (`buildAdapters` in `AdapterBuilder.kt`); unimplemented tools
+(gatling, vegeta, wrk) stay out of the tool surface until parsers exist.
 
 The adapter is responsible for:
 
@@ -263,14 +294,16 @@ This avoids partially written outputs and makes the integration test predictable
 
 ## Authentication and Security
 
-The Phase 1 auth model should stay intentionally simple:
+The Phase 1 auth model is intentionally simple:
 
-- A bearer token is passed in the `initialize` request.
-- The server validates it once per session and rejects invalid or missing tokens with `-32005`.
-- Every tool call is checked against the authenticated session state.
-- No role model, token rotation workflow, or admin UI is required in Phase 1.
+- A token is required at startup (`--token=<token>` or `BOEHM_TOKEN`); the
+  server refuses to start without one.
+- stdio transport security is delegated to the spawning process — whoever can
+  talk to the server's stdin is trusted (the spawner supplied the token).
+- No per-request validation, role model, or token rotation in Phase 1.
 
-The important design choice is not the algorithm itself but that the server never executes tools for an unauthenticated session.
+The important design choice is that the server never runs without an explicit
+token, so accidental unsandboxed starts are visible.
 
 ---
 
@@ -302,18 +335,18 @@ Boehm/
 │   └── gatling/http-get.scala       # Gatling simulation template
 ├── src/
 │   ├── main/kotlin/io/boehm/
-│   │   ├── Main.kt                  # Entry point: stdio + catalog loader
-│   │   ├── auth/
-│   │   │   └── AuthHandler.kt       # Bearer token validation
+│   │   ├── Main.kt                  # Entry point: stdio + catalog loader + 9 tool registrations
 │   │   ├── catalog/
 │   │   │   ├── CatalogModels.kt     # Catalog YAML data classes
 │   │   │   ├── CatalogLoader.kt     # Parse catalog.yaml
+│   │   │   ├── AdapterBuilder.kt    # Build adapters only for parser-backed schemas
 │   │   │   └── CatalogAdapter.kt    # Generic PerfToolAdapter
 │   │   ├── core/
-│   │   │   ├── BoehmToolHandlers.kt  # 5 MCP tool handlers (suspend funs)
-│   │   │   ├── Orchestrator.kt      # Test plan routing, run lifecycle
-│   │   │   ├── Scheduler.kt         # Serial run queue
-│   │   │   └── Store.kt             # SQLite operations
+│   │   │   ├── BoehmToolHandlers.kt  # MCP tool handlers (suspend funs)
+│   │   │   ├── Comparator.kt         # Direction-aware baseline comparison
+│   │   │   ├── Orchestrator.kt       # Test plan routing, run lifecycle, cancel routing
+│   │   │   ├── Scheduler.kt          # Serial run queue + subprocess cancellation
+│   │   │   └── Store.kt              # SQLite operations (runs, scenarios, baselines)
 │   │   ├── model/
 │   │   │   ├── TestPlan.kt          # Input: how to run a test
 │   │   │   ├── RunResult.kt         # Output: normalized result + summary
@@ -321,18 +354,23 @@ Boehm/
 │   │   └── adapters/
 │   │       ├── PerfToolAdapter.kt   # Interface all adapters implement
 │   │       ├── tulip/
-│   │       │   └── TulipParser.kt   # Parse Tulip JSON → RunResult
-│   │       └── jmeter/
-│   │           └── JMeterParser.kt  # Parse JMeter JTL CSV → RunResult
+│   │       │   └── TulipParser.kt    # Parse Tulip JSON → RunResult
+│   │       ├── jmeter/
+│   │       │   └── JMeterParser.kt   # Parse JMeter JTL CSV → RunResult
+│   │       └── k6/
+│   │           └── K6Parser.kt       # Parse k6 NDJSON → RunResult
 │   └── test/kotlin/io/boehm/
 │       ├── adapter/
 │       │   ├── TulipAdapterTest.kt  # Tests CatalogAdapter via tulip profile
 │       │   ├── TulipParserTest.kt
-│       │   └── JMeterParserTest.kt
-│       ├── auth/
-│       │   └── AuthHandlerTest.kt
+│       │   ├── JMeterParserTest.kt
+│       │   └── K6ParserTest.kt
+│       ├── catalog/
+│       │   ├── AdapterBuilderTest.kt
+│       │   └── CatalogLoaderTest.kt
 │       ├── core/
 │       │   ├── BoehmServerTest.kt
+│       │   ├── ComparatorTest.kt
 │       │   ├── OrchestratorTest.kt
 │       │   ├── SchedulerTest.kt
 │       │   └── StoreTest.kt

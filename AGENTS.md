@@ -57,7 +57,7 @@ Designed but not yet implemented: Gatling, vegeta, wrk.
 │  ┌─────────────┐  ┌──────────────┐  ┌──────────────────────┐ │
 │  │  Agent       │  │  JSON-RPC    │  │  Catalog + Profiles  │ │
 │  │  (opencode,  │──│  McpHandler  │──│  catalog.yaml        │ │
-│  │   etc)       │  │  AuthHandler │  │  profiles/<tool>/*   │ │
+│  │   etc)       │  │  Handlers    │  │  profiles/<tool>/*   │ │
 │  └──────────────┘  └──────┬───────┘  └──────────┬───────────┘ │
 │                           │                      │            │
 │                    ┌──────▼──────────────────────▼──────────┐  │
