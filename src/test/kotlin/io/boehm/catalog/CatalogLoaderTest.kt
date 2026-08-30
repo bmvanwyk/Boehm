@@ -14,8 +14,7 @@ class CatalogLoaderTest {
         assertTrue(catalog.tools.containsKey("k6"))
         assertTrue(catalog.tools.containsKey("jmeter"))
         assertTrue(catalog.tools.containsKey("gatling"))
-        assertTrue(catalog.tools.containsKey("vegeta"))
-        assertTrue(catalog.tools.containsKey("wrk"))
+        assertEquals(4, catalog.tools.size)
         assertEquals(1, catalog.version)
     }
 
@@ -63,9 +62,8 @@ class CatalogLoaderTest {
     }
 
     @Test
-    fun `vegeta and wrk have no config template`() {
+    fun `gatling has scala config template`() {
         val catalog = CatalogLoader(catalogPath).load()
-        assertNull(catalog.tools["vegeta"]!!.profiles["http-get"]!!.config)
-        assertNull(catalog.tools["wrk"]!!.profiles["http-get"]!!.config)
+        assertTrue(catalog.tools["gatling"]!!.profiles["http-get"]!!.config!!.endsWith(".scala"))
     }
 }

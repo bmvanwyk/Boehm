@@ -11,29 +11,40 @@ import java.io.File
 class JMeterIntegrationTest {
     private val baseDir = File("").absolutePath
 
-    private fun jmeterAvailable(): Boolean {
-        val javaHome = System.getenv("JAVA_HOME") ?: System.getProperty("java.home")
-        val jmeterPath = "${System.getenv("HOME")}/.sdkman/apache-jmeter-5.6.3/bin/jmeter"
-        return File(jmeterPath).exists() && javaHome != null
+    private fun findJMeterCommand(): String? {
+        val jmeterBin = "${System.getenv("HOME")}/.sdkman/apache-jmeter-5.6.3/bin/jmeter"
+        if (File(jmeterBin).exists()) {
+            return "JAVA_HOME=${System.getProperty("java.home")} $jmeterBin " +
+                "-Jtarget_url={{target_url}} " +
+                "-Jthreads={{threads}} " +
+                "-Jduration_sec={{duration_sec}} " +
+                "-n -t {{config_file}} " +
+                "-l {{output_file}} " +
+                "-j {{output_file}}.log"
+        }
+        // Docker fallback: justb4/jmeter
+        val docker = System.getenv("PATH")?.split(File.pathSeparator)?.firstOrNull { File("$it/docker").exists() }
+        if (docker != null) {
+            return "docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} -v {{output_file}}.log:{{output_file}}.log justb4/jmeter:5.6.3 " +
+                "-Jtarget_url={{target_url}} " +
+                "-Jthreads={{threads}} " +
+                "-Jduration_sec={{duration_sec}} " +
+                "-n -t {{config_file}} " +
+                "-l {{output_file}} " +
+                "-j {{output_file}}.log"
+        }
+        return null
     }
 
     private fun makeAdapter(): CatalogAdapter {
-        val jmeterBin = "${System.getenv("HOME")}/.sdkman/apache-jmeter-5.6.3/bin/jmeter"
-        assumeTrue(File(jmeterBin).exists(), "JMeter not found at $jmeterBin")
+        val cmd = findJMeterCommand()
+        assumeTrue(cmd != null, "JMeter not found (bare metal nor docker)")
 
         val toolDef = ToolDef(
             name = "jmeter",
             description = "Apache JMeter (Java, GUI + CLI)",
             install = null,
-            run = RunDef(
-                command = "JAVA_HOME=${System.getProperty("java.home")} $jmeterBin " +
-                    "-Jtarget_url={{target_url}} " +
-                    "-Jthreads={{threads}} " +
-                    "-Jduration_sec={{duration_sec}} " +
-                    "-n -t {{config_file}} " +
-                    "-l {{output_file}} " +
-                    "-j {{output_file}}.log"
-            ),
+            run = RunDef(command = cmd!!),
             profiles = mapOf(
                 "http-get" to ProfileDef(
                     name = "http-get",

@@ -8,10 +8,11 @@ Named after [Barry Boehm](https://en.wikipedia.org/wiki/Barry_Boehm). The server
 
 - **Java 25** — managed via sdkman (`.sdkmanrc` pins `java=25.0.2-open`, `kotlin=2.4.10`): `sdk env`
 - **Tulip CLI** (for Tulip adapter) — cloned to `~/git/Tulip`, built with `./gradlew build`
-- **JMeter** (for JMeter adapter) — install [Apache JMeter 5.6.3](https://jmeter.apache.org/download_jmeter.cgi), ensure `jmeter` on `PATH` and `JAVA_HOME` set
-- **k6** (for k6 adapter) — `brew install k6`, the [official deb repo](https://grafana.com/docs/k6/latest/set-up/install-k6/), or `go install go.k6.io/k6@latest`; ensure `k6` on `PATH`
+- **JMeter** (for JMeter adapter) — bare metal: install [Apache JMeter 5.6.3](https://jmeter.apache.org/download_jmeter.cgi), ensure `jmeter` on `PATH` and `JAVA_HOME` set; or Docker: `docker pull justb4/jmeter:5.6.3` (integration tests use Docker fallback if `jmeter` not found)
+- **k6** (for k6 adapter) — bare metal: `brew install k6`, the [official deb repo](https://grafana.com/docs/k6/latest/set-up/install-k6/), or `go install go.k6.io/k6@latest`; or Docker: `docker pull grafana/k6:latest`
+- **Gatling** (for Gatling adapter) — bare metal: `sdk install gatling` or `brew install gatling`; or Docker: `docker pull denvazh/gatling:3.9.5` (integration tests use Docker fallback)
 
-Only Tulip/k6/JMeter have parsers and are registered at runtime. Gatling, vegeta, and wrk are declared in `catalog.yaml` but skipped until parsers exist.
+All four tools have parsers and are registered at runtime. Add new tools in `catalog.yaml`; any profile whose `output.schema` lacks a parser is skipped at startup with a stderr note.
 
 ## Quick start
 
@@ -25,10 +26,11 @@ Only Tulip/k6/JMeter have parsers and are registered at runtime. Gatling, vegeta
 # Coverage report (HTML at build/reports/jacoco/test/html/)
 ./gradlew test jacocoTestReport
 
-# Integration tests (each skips gracefully if its binary is absent)
+# Integration tests (each skips gracefully if binary/Docker image is absent)
 ./gradlew test --tests "io.boehm.integration.TulipIntegrationTest"
-./gradlew test --tests "io.boehm.integration.JMeterIntegrationTest"
-./gradlew test --tests "io.boehm.integration.K6IntegrationTest"
+./gradlew test --tests "io.boehm.integration.JMeterIntegrationTest"  # tries ~/.sdkman/apache-jmeter-5.6.3, then docker justb4/jmeter:5.6.3
+./gradlew test --tests "io.boehm.integration.K6IntegrationTest"        # tries k6 on PATH/~/go/bin/k6, then docker grafana/k6:latest
+./gradlew test --tests "io.boehm.integration.GatlingIntegrationTest"   # tries gatling on PATH/sdkman, then docker denvazh/gatling:3.9.5
 
 # Start the MCP server (stdio); token required
 ./gradlew run --args="--token=boehm_sk_$(openssl rand -hex 16)"
@@ -71,14 +73,15 @@ Boehm/
 │       ├── PerfToolAdapter.kt    # interface (name, profile, validate, run)
 │       ├── tulip/TulipParser.kt  # Tulip JSON → RunResult
 │       ├── jmeter/JMeterParser.kt # JTL CSV → RunResult
-│       └── k6/K6Parser.kt        # NDJSON → RunResult
+│       ├── k6/K6Parser.kt        # NDJSON → RunResult
+│       └── gatling/GatlingParser.kt # Gatling global_stats.json → RunResult
 └── src/test/kotlin/io/boehm/
-    ├── adapter/                  # TulipAdapterTest, TulipParserTest, JMeterParserTest, K6ParserTest
+    ├── adapter/                  # TulipAdapterTest, TulipParserTest, JMeterParserTest, K6ParserTest, GatlingParserTest
     ├── catalog/                  # AdapterBuilderTest, CatalogLoaderTest, CatalogAdapterValidationTest
     ├── core/                     # BoehmServerTest, ComparatorTest, OrchestratorTest, SchedulerTest, StoreTest
     ├── model/                    # RunResultTest, ProgressEventTest
-    ├── fixtures/                 # mock-tulip.sh, tulip-sample-output.json, jmeter-sample-output.csv, k6-sample-output.jsonl
-    └── integration/              # TulipIntegrationTest, JMeterIntegrationTest, K6IntegrationTest
+    ├── fixtures/                 # mock-tulip.sh, tulip-sample-output.json, jmeter-sample-output.csv, k6-sample-output.jsonl, gatling-sample-output.json
+    └── integration/              # TulipIntegrationTest, JMeterIntegrationTest, K6IntegrationTest, GatlingIntegrationTest
 ```
 
 ## Using with opencode
@@ -111,7 +114,7 @@ use boehm to cancel run <runId>
 | `compare_runs` | `run_id`, `baseline_run_id?` | Per-metric `deltaPct` + `verdict` (`regression`/`improvement`/`unchanged`, >10% threshold, direction-aware), plus `regressions`/`improvements` lists |
 | `cancel_run` | `run_id` | Cancels `pending`/`queued` (flipped to `cancelled`) or `running` (subprocess tree killed, recorded as `cancelled`) |
 
-Profiles whose `output.schema` has no parser (Gatling `gatling-stats`, vegeta `vegeta-report`, wrk `wrk-text`) are skipped at startup with a stderr note and never appear in `list_adapters`.
+Profiles whose `output.schema` has no parser are skipped at startup with a stderr note and never appear in `list_adapters`.
 
 ## How it works
 
@@ -131,9 +134,7 @@ Profiles whose `output.schema` has no parser (Gatling `gatling-stats`, vegeta `v
 | Tulip | `http-get`, `demo` | Implemented (`TulipParser`, `tulip-results`) |
 | k6 | `http-get` | Implemented (`K6Parser`, `k6-jsonl`) |
 | JMeter | `http-get` | Implemented (`JMeterParser`, `jmeter-csv`) |
-| Gatling | `http-get` | Catalog-only (no parser for `gatling-stats`) |
-| vegeta | `http-get` | Catalog-only (no parser for `vegeta-report`) |
-| wrk | `http-get` | Catalog-only (no parser for `wrk-text`) |
+| Gatling | `http-get` | Implemented (`GatlingParser`, `gatling-stats`) |
 
 Each profile declares a static config template, overridable params, and the output `path`/`format`/`schema` so `CatalogAdapter` knows where to find and how to parse results.
 
@@ -155,11 +156,11 @@ tools:
     profiles:
       http-get:
         description: "HTTP GET with configurable rate and duration"
-        config: profiles/k6/http-get.js # path relative to repo root; null for CLI-only tools (vegeta)
+        config: profiles/k6/http-get.js # path relative to repo root; null for CLI-only not used
         output:
           path: "{{output_file}}"       # "{{output_file}}" (temp file), "{{config.actions.output_filename}}" (embedded in JSON config), or "stdout"
           format: jsonl                 # json | jsonl | csv | text (for docs)
-          schema: k6-jsonl              # must match a parser key in Main.kt (tulip-results, jmeter-csv, k6-jsonl) or profile is skipped
+          schema: k6-jsonl              # must match a parser key in Main.kt (tulip-results, jmeter-csv, k6-jsonl, gatling-stats) or profile is skipped
         overrides:
           target_url: { default: "https://httpbin.org/get" }          # path: null for script templates
           rate_per_sec: { default: 50 }
@@ -198,7 +199,7 @@ Overrides not listed are ignored (`CatalogAdapter.kt:184`); `target_url` is vali
 
 ### Adding a new tool
 
-Add a new top-level entry under `tools:` with `run.command` and at least one profile whose `output.schema` matches an existing parser (to avoid writing a parser) or add a new parser object (`TulipParser.kt`/`K6Parser.kt`/`JMeterParser.kt`) and register it in the `parsers` map in `Main.kt:50`.
+Add a new top-level entry under `tools:` with `run.command` and at least one profile whose `output.schema` matches an existing parser (to avoid writing a parser) or add a new parser object (`TulipParser.kt`/`K6Parser.kt`/`JMeterParser.kt`/`GatlingParser.kt`) and register it in the `parsers` map in `Main.kt:50`.
 
 ## Quality and docs
 

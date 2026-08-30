@@ -24,13 +24,12 @@ Read `docs/architecture.md` before changing behaviour.
 
 ## Implemented Adapters
 
-| Tool | Parser | Profile(s) | Integration Test |
-|------|--------|------------|------------------|
-| Tulip | `TulipParser` (JSON) | `http-get`, `demo` | `TulipIntegrationTest` |
-| JMeter | `JMeterParser` (JTL CSV) | `http-get` | `JMeterIntegrationTest` |
-| k6 | `K6Parser` (NDJSON) | `http-get` | `K6IntegrationTest` |
-
-Designed but not yet implemented: Gatling, vegeta, wrk.
+| Tool | Parser | Profile(s) | Integration Test | Docker |
+|------|--------|------------|------------------|--------|
+| Tulip | `TulipParser` (JSON) | `http-get`, `demo` | `TulipIntegrationTest` | No (bare metal only) |
+| JMeter | `JMeterParser` (JTL CSV) | `http-get` | `JMeterIntegrationTest` | Yes (`justb4/jmeter:5.6.3` fallback) |
+| k6 | `K6Parser` (NDJSON) | `http-get` | `K6IntegrationTest` | Yes (`grafana/k6:latest` fallback) |
+| Gatling | `GatlingParser` (JSON) | `http-get` | `GatlingIntegrationTest` | Yes (`denvazh/gatling:3.9.5` fallback) |
 
 ## Stack
 

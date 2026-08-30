@@ -7,7 +7,6 @@
 # The `output` field tells Boehm where to find the tool's results after execution.
 #   - For JSON-based tools (Tulip): output path is embedded in the config JSON
 #   - For script-based tools (k6, JMeter, Gatling): output is {{output_file}}
-#   - For CLI-only tools (vegeta, wrk): output is {{output_file}} or stdout
 #
 # Consistency of measurement: the same template file is used every run,
 # so test structure never drifts. Only the declared override params vary.
@@ -64,7 +63,9 @@ tools:
   # ── k6 ────────────────────────────────────────────────────────────────
   k6:
     description: "Load testing tool by Grafana (JavaScript)"
-    install: "brew install k6"
+    install: |
+      brew install k6
+      # Docker (no local install): docker pull grafana/k6:latest
     run:
       command: >
         k6 run
@@ -92,7 +93,9 @@ tools:
   # ── JMeter ────────────────────────────────────────────────────────────
   jmeter:
     description: "Apache JMeter (Java, GUI + CLI)"
-    install: "brew install jmeter"
+    install: |
+      brew install jmeter
+      # Docker (no local install): docker pull justb4/jmeter:5.6.3
     run:
       command: >
         jmeter
@@ -121,7 +124,10 @@ tools:
   # ── Gatling ───────────────────────────────────────────────────────────
   gatling:
     description: "Scala-based load testing by Gatling Corp"
-    install: "brew install gatling"
+    install: |
+      # Bare metal: sdk install gatling or brew install gatling
+      # Docker (preferred, no local install): docker pull denvazh/gatling:3.9.5
+      # JMeter/K6 also support docker: justb4/jmeter:5.6.3, grafana/k6:latest
     run:
       command: >
         gatling run
@@ -143,61 +149,5 @@ tools:
             default: "https://httpbin.org/get"
           rate_per_sec:
             default: 50
-          duration_sec:
-            default: 30
-
-  # ── vegeta ────────────────────────────────────────────────────────────
-  vegeta:
-    description: "HTTP load testing by Uber (Go, single binary)"
-    install: "brew install vegeta"
-    run:
-      command: >
-        echo 'GET {{target_url}}'
-        | vegeta attack
-          -rate={{rate_per_sec}}
-          -duration={{duration_sec}}s
-          -output={{output_file}}.bin
-        && vegeta report --type=json {{output_file}}.bin > {{output_file}}
-    profiles:
-      http-get:
-        description: "HTTP GET at constant rate"
-        output:
-          path: "{{output_file}}"
-          format: json
-          schema: vegeta-report
-        overrides:
-          target_url:
-            default: "https://httpbin.org/get"
-          rate_per_sec:
-            default: 50
-          duration_sec:
-            default: 30
-
-  # ── wrk ───────────────────────────────────────────────────────────────
-  wrk:
-    description: "HTTP benchmarking tool (C, single binary)"
-    install: "brew install wrk"
-    run:
-      command: >
-        wrk
-        -t{{threads}}
-        -c{{connections}}
-        -d{{duration_sec}}s
-        --latency
-        {{target_url}}
-    profiles:
-      http-get:
-        description: "HTTP GET with fixed concurrency"
-        output:
-          path: "stdout"
-          format: text
-          schema: wrk-text
-        overrides:
-          target_url:
-            default: "https://httpbin.org/get"
-          threads:
-            default: 4
-          connections:
-            default: 100
           duration_sec:
             default: 30

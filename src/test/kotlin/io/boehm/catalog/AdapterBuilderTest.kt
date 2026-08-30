@@ -26,7 +26,7 @@ class AdapterBuilderTest {
         val parsers = mapOf<String, (String) -> io.boehm.model.RunResult>(
             "known-schema" to { _ -> throw UnsupportedOperationException() }
         )
-        val adapters = buildAdapters(catalogWithSchemas("known-schema", "wrk-text"), System.getProperty("java.io.tmpdir"), parsers)
+        val adapters = buildAdapters(catalogWithSchemas("known-schema", "unknown-schema"), System.getProperty("java.io.tmpdir"), parsers)
 
         assertEquals(listOf("tooly:known-schema-profile"), adapters.map { "${it.name}:${it.profile}" })
     }

@@ -11,32 +11,35 @@ import java.io.File
 class K6IntegrationTest {
     private val baseDir = File("").absolutePath
 
-    private fun k6Path(): String? {
+    private fun findK6Command(): String? {
         val fromPath = System.getenv("PATH")
             .split(File.pathSeparator)
             .firstOrNull { p -> File("$p/k6").exists() }
             ?.let { "$it/k6" }
-        if (fromPath != null) return fromPath
+        if (fromPath != null) {
+            return "$fromPath run -e TARGET_URL={{target_url}} -e RATE_PER_SEC={{rate_per_sec}} -e DURATION_SEC={{duration_sec}} --out json={{output_file}} {{config_file}}"
+        }
         val goBin = "${System.getenv("HOME")}/go/bin/k6"
-        return if (File(goBin).exists()) goBin else null
+        if (File(goBin).exists()) {
+            return "$goBin run -e TARGET_URL={{target_url}} -e RATE_PER_SEC={{rate_per_sec}} -e DURATION_SEC={{duration_sec}} --out json={{output_file}} {{config_file}}"
+        }
+        // Docker fallback
+        val docker = System.getenv("PATH")?.split(File.pathSeparator)?.firstOrNull { File("$it/docker").exists() }
+        if (docker != null) {
+            return "docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} grafana/k6:latest run -e TARGET_URL={{target_url}} -e RATE_PER_SEC={{rate_per_sec}} -e DURATION_SEC={{duration_sec}} --out json={{output_file}} {{config_file}}"
+        }
+        return null
     }
 
     private fun makeAdapter(): CatalogAdapter {
-        val k6Bin = k6Path()
-        assumeTrue(k6Bin != null, "k6 binary not found on PATH or ~/go/bin/k6")
+        val cmd = findK6Command()
+        assumeTrue(cmd != null, "k6 not found (bare metal nor docker)")
 
         val toolDef = ToolDef(
             name = "k6",
             description = "Load testing tool by Grafana (JavaScript)",
             install = null,
-            run = RunDef(
-                command = "$k6Bin run " +
-                    "-e TARGET_URL={{target_url}} " +
-                    "-e RATE_PER_SEC={{rate_per_sec}} " +
-                    "-e DURATION_SEC={{duration_sec}} " +
-                    "--out json={{output_file}} " +
-                    "{{config_file}}"
-            ),
+            run = RunDef(command = cmd!!),
             profiles = mapOf(
                 "http-get" to ProfileDef(
                     name = "http-get",

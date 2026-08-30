@@ -9,9 +9,9 @@ graph TB
     Agent["AI Agent<br/>(opencode, Claude Code, etc.)"]
     Boehm["Boehm MCP Server<br/>Kotlin/JVM 25"]
     Tulip["Tulip CLI"]
-    K6["k6"]
-    JMeter["JMeter"]
-    Other["Gatling / vegeta / wrk<br/>(catalog-only until parser exists)"]
+    K6["k6<br/>(bare metal or docker)"]
+    JMeter["JMeter<br/>(bare metal or docker)"]
+    Gatling["Gatling<br/>(bare metal or docker)"]
     Target["Target System<br/>(e.g. httpbin.org)"]
     SQLite[(SQLite<br/>~/.boehm/boehm.db)]
     OutputDir[(Raw Outputs<br/>~/.boehm/outputs/&lt;tool&gt;/)]
@@ -20,10 +20,11 @@ graph TB
     Boehm -- "bash -c + capture" --> Tulip
     Boehm -- "bash -c + capture" --> K6
     Boehm -- "bash -c + capture" --> JMeter
-    Boehm -. "not registered (no parser)" .-> Other
+    Boehm -- "bash -c + capture" --> Gatling
     Tulip -- "HTTP load" --> Target
     K6 -- "HTTP load" --> Target
     JMeter -- "HTTP load" --> Target
+    Gatling -- "HTTP load" --> Target
     Boehm -- "persist runs, scenarios, baselines" --> SQLite
     Boehm -- "write raw stdout / output files" --> OutputDir
 ```
@@ -33,7 +34,7 @@ graph TB
 1. **MCP server is the entrypoint, not the execution engine.** `run_test` validates, persists a `queued` run, and returns immediately. A background scheduler serially executes runs so the stdio loop never blocks.
 2. **SQLite is the source of truth.** Runs, queue state, baselines, and errors are persisted. In-memory state is a cache. The DB path is configurable via `BOEHM_DB_PATH` (`~/.boehm/boehm.db` default, `BOEHM_CATALOG_PATH` for the catalog).
 3. **Adapter boundary is narrow.** `PerfToolAdapter` exposes `validate` and `run` (with an optional `onProcessStart` callback for cancellation). All tool-specific work (template rendering, command substitution, parsing) lives behind that interface.
-4. **Catalog-driven.** Every tool and profile is declared in `catalog.yaml`. No hardcoded adapters. `AdapterBuilder` registers only profiles whose `output.schema` has a parser (`tulip-results`, `jmeter-csv`, `k6-jsonl`) — others (Gatling/vegeta/wrk) appear in the catalog but not in `list_adapters`.
+4. **Catalog-driven.** Every tool and profile is declared in `catalog.yaml`. No hardcoded adapters. `AdapterBuilder` registers only profiles whose `output.schema` has a parser (`tulip-results`, `jmeter-csv`, `k6-jsonl`, `gatling-stats`).
 5. **Local-first and serial.** One run at a time prevents measurement noise. No cloud dependencies. All `Store` access is serialized behind a single lock (shared SQLite `Connection` is not thread-safe).
 6. **Measurement integrity.** Resubmitting a scenario name upserts its stored plan; timestamps are ISO-8601 (`Instant.now().toString()`) everywhere so lexicographic ordering is correct; timeout is validated before queuing.
 
@@ -61,6 +62,7 @@ graph TB
         TulipParser["TulipParser.kt<br/>JSON → RunResult"]
         JMeterParser["JMeterParser.kt<br/>JTL CSV → RunResult"]
         K6Parser["K6Parser.kt<br/>NDJSON → RunResult"]
+        GatlingParser["GatlingParser.kt<br/>global_stats.json → RunResult"]
     end
 
     subgraph "Catalog"
@@ -90,9 +92,11 @@ graph TB
     CatalogAdapter --> TulipParser
     CatalogAdapter --> JMeterParser
     CatalogAdapter --> K6Parser
+    CatalogAdapter --> GatlingParser
     TulipParser --> Models
     JMeterParser --> Models
     K6Parser --> Models
+    GatlingParser --> Models
     Store --> SQLite[(SQLite)]
 ```
 
@@ -248,14 +252,14 @@ interface PerfToolAdapter {
 }
 ```
 
-Only profiles whose `output.schema` has a parser get an adapter (`AdapterBuilder.buildAdapters`); unimplemented tools (Gatling `gatling-stats`, vegeta `vegeta-report`, wrk `wrk-text`) are skipped with a stderr note.
+Only profiles whose `output.schema` has a parser get an adapter (`AdapterBuilder.buildAdapters`); any profile with an unknown schema is skipped with a stderr note (all current profiles have parsers: `tulip-results`, `jmeter-csv`, `k6-jsonl`, `gatling-stats`).
 
 `CatalogAdapter` is the sole implementation:
 
 - Loads the profile template from `profiles/<tool>/`. JSON/JSONC templates have overrides applied via JSON path (`profile.overrides[].path`) with type coercion based on the existing value; script templates (`.js`, `.jmx`, `.scala`) are copied as-is and overrides are passed via env vars / CLI flags (`-e`, `-J`, `-D`) through command substitution.
 - Builds a temp config file, resolves the output path (either `{{config.<jsonPath>}}` embedded in the config, `{{output_file}}`, or `stdout`), and substitutes `{{config_file}}`, `{{output_file}}`, and all override keys into `toolDef.run.command`.
 - Executes via `bash -c`, captures stdout via `CompletableFuture`, and enforces `TestPlan.timeoutSec` with `process.waitFor(timeout, SECONDS)`. On timeout, kills the entire subprocess tree (`process.descendants().forEach { destroyForcibly() }`), waits 2 s, and returns a `failed` result with `timeout after Xs`.
-- Reads output from the declared file or stdout, then dispatches to the parser for `profileDef.output.schema` (`tulip-results`, `k6-jsonl`, `jmeter-csv`). Parse failures return `failed` with `Parse error`.
+- Reads output from the declared file or stdout, then dispatches to the parser for `profileDef.output.schema` (`tulip-results`, `k6-jsonl`, `jmeter-csv`, `gatling-stats`). Parse failures return `failed` with `Parse error`.
 - Sanitizes every override: rejects shell metacharacters (`;|&` + backtick + `$(){}<>` + newlines), validates `target_url` against `^[a-zA-Z0-9._\-:/]+$`, and validates numeric overrides as integers.
 - Validates `timeoutSec >= durationSec + warmupSec + 10` when the profile exposes `duration_sec`; otherwise the run would be killed mid-test.
 
@@ -265,6 +269,7 @@ Parsers normalize tool-specific output into `RunResult` / `Summary` / `Latency`:
 - `TulipParser`: JSON with `results[]` array, latency in nanoseconds → ms; `meanMs`/`stdevMs` from `avg_rt`/`sd_rt`.
 - `JMeterParser`: JTL CSV with nearest-rank percentiles.
 - `K6Parser`: NDJSON `Metric` lines, computes percentiles from `http_req_duration` samples.
+- `GatlingParser`: `js/global_stats.json` with string-encoded numbers; p50/p90/p95/p99 from `percentiles1`/`percentiles2`/`percentiles3`/`percentiles4`, mean/stdev from `meanResponseTime`/`standardDeviation`, throughput from `meanNumberOfRequestsPerSecond`.
 
 ## Store and Schema
 
@@ -362,11 +367,13 @@ Boehm/
 │       ├── PerfToolAdapter.kt        # interface
 │       ├── tulip/TulipParser.kt
 │       ├── jmeter/JMeterParser.kt
-│       └── k6/K6Parser.kt
+│       ├── k6/K6Parser.kt
+│       └── gatling/GatlingParser.kt  # Gatling global_stats.json → RunResult
 └── src/test/kotlin/io/boehm/
-    ├── adapter/                      # TulipAdapterTest, TulipParserTest, JMeterParserTest, K6ParserTest
+    ├── adapter/                      # TulipAdapterTest, TulipParserTest, JMeterParserTest, K6ParserTest, GatlingParserTest
     ├── catalog/                      # AdapterBuilderTest, CatalogLoaderTest, CatalogAdapterValidationTest
     ├── core/                         # BoehmServerTest, ComparatorTest, OrchestratorTest, SchedulerTest, StoreTest
     ├── model/                        # RunResultTest, ProgressEventTest
-    └── integration/                  # TulipIntegrationTest, JMeterIntegrationTest, K6IntegrationTest
+    ├── fixtures/                     # mock-tulip.sh, tulip-sample-output.json, jmeter-sample-output.csv, k6-sample-output.jsonl, gatling-sample-output.json
+    └── integration/                  # TulipIntegrationTest, JMeterIntegrationTest, K6IntegrationTest, GatlingIntegrationTest (JMeter/K6/Gatling support Docker fallback)
 ```

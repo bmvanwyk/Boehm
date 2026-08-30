@@ -1,6 +1,7 @@
 package io.boehm
 
 import io.boehm.adapters.PerfToolAdapter
+import io.boehm.adapters.gatling.GatlingParser
 import io.boehm.adapters.jmeter.JMeterParser
 import io.boehm.adapters.k6.K6Parser
 import io.boehm.adapters.tulip.TulipParser
@@ -50,7 +51,8 @@ fun main(args: Array<String>) {
     val parsers: Map<String, (String) -> io.boehm.model.RunResult> = mapOf(
         "tulip-results" to { raw -> TulipParser.parse(raw) },
         "jmeter-csv" to { raw -> JMeterParser.parse(raw) },
-        "k6-jsonl" to { raw -> K6Parser.parse(raw) }
+        "k6-jsonl" to { raw -> K6Parser.parse(raw) },
+        "gatling-stats" to { raw -> GatlingParser.parse(raw) }
     )
 
     // Load catalog and create adapters (only profiles whose output schema has a parser)
