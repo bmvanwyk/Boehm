@@ -25,27 +25,24 @@ class GatlingIntegrationTest {
             return candidates.first()
         }
 
-        // Try docker
+        // Try docker (podman via docker alias needs fully-qualified image) — skip if not cached
         val docker = System.getenv("PATH")?.split(File.pathSeparator)
             ?.firstOrNull { p -> File("$p/docker").exists() }
-        if (docker != null) {
-            // Check docker is runnable and image is available or can be pulled
-            try {
-                val proc = ProcessBuilder("docker", "images", "denvazh/gatling:3.9.5").redirectErrorStream(true).start()
-                proc.waitFor()
-                // If image not present, try to pull (may fail offline, then skip)
-                // Use docker run command as gatling runner
-                return "docker run --rm -v $baseDir:/opt/gatling -w /opt/gatling denvazh/gatling:3.9.5"
-            } catch (_: Exception) {
-                return null
-            }
+        if (docker != null && isDockerImagePresent("docker.io/denvazh/gatling:3.9.5")) {
+            return "docker run --rm -v $baseDir:/opt/gatling -w /opt/gatling docker.io/denvazh/gatling:3.9.5"
         }
         return null
     }
 
+    private fun isDockerImagePresent(image: String): Boolean {
+        return try {
+            val proc = ProcessBuilder("docker", "image", "inspect", image).redirectErrorStream(true).start()
+            proc.waitFor() == 0
+        } catch (_: Exception) { false }
+    }
+
     private fun makeAdapter(gatlingCmd: String): CatalogAdapter {
         val runCmd = if (gatlingCmd.contains("docker")) {
-            // Docker variant: mount repo at /opt/gatling, results go to /tmp inside container then back via volume
             "$gatlingCmd gatling run -Dtarget_url={{target_url}} -Drate_per_sec={{rate_per_sec}} -Dduration_sec={{duration_sec}} -s profiles.HttpGetSimulation -rf {{output_file}}.results"
         } else {
             "$gatlingCmd run -Dtarget_url={{target_url}} -Drate_per_sec={{rate_per_sec}} -Dduration_sec={{duration_sec}} -s profiles.HttpGetSimulation -rf {{output_file}}.results"
@@ -81,7 +78,7 @@ class GatlingIntegrationTest {
     @Test
     fun `gatling CLI runs against httpbin and returns valid RunResult`() {
         val gatlingCmd = findGatlingCommand()
-        assumeTrue(gatlingCmd != null, "Gatling not found (bare metal nor docker); skipping")
+        assumeTrue(gatlingCmd != null, "Gatling not found (bare metal nor docker image cached); skipping")
         val adapter = makeAdapter(gatlingCmd!!)
 
         val plan = TestPlan(

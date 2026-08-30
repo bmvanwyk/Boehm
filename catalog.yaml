@@ -65,7 +65,7 @@ tools:
     description: "Load testing tool by Grafana (JavaScript)"
     install: |
       brew install k6
-      # Docker (no local install): docker pull grafana/k6:latest
+      # Docker (no local install): docker pull docker.io/grafana/k6:latest
     run:
       command: >
         k6 run
@@ -95,7 +95,7 @@ tools:
     description: "Apache JMeter (Java, GUI + CLI)"
     install: |
       brew install jmeter
-      # Docker (no local install): docker pull justb4/jmeter:5.6.3
+      # Docker (no local install): docker pull docker.io/justb4/jmeter:5.6.3
     run:
       command: >
         jmeter
@@ -126,8 +126,8 @@ tools:
     description: "Scala-based load testing by Gatling Corp"
     install: |
       # Bare metal: sdk install gatling or brew install gatling
-      # Docker (preferred, no local install): docker pull denvazh/gatling:3.9.5
-      # JMeter/K6 also support docker: justb4/jmeter:5.6.3, grafana/k6:latest
+      # Docker (preferred, no local install): docker pull docker.io/denvazh/gatling:3.9.5
+      # JMeter/K6 also support docker: docker.io/justb4/jmeter:5.6.3, docker.io/grafana/k6:latest
     run:
       command: >
         gatling run

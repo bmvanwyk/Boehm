@@ -23,17 +23,24 @@ class K6IntegrationTest {
         if (File(goBin).exists()) {
             return "$goBin run -e TARGET_URL={{target_url}} -e RATE_PER_SEC={{rate_per_sec}} -e DURATION_SEC={{duration_sec}} --out json={{output_file}} {{config_file}}"
         }
-        // Docker fallback
+        // Docker fallback (podman needs fully-qualified) — skip if image not cached
         val docker = System.getenv("PATH")?.split(File.pathSeparator)?.firstOrNull { File("$it/docker").exists() }
-        if (docker != null) {
-            return "docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} grafana/k6:latest run -e TARGET_URL={{target_url}} -e RATE_PER_SEC={{rate_per_sec}} -e DURATION_SEC={{duration_sec}} --out json={{output_file}} {{config_file}}"
+        if (docker != null && isDockerImagePresent("docker.io/grafana/k6:latest")) {
+            return "docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} docker.io/grafana/k6:latest run -e TARGET_URL={{target_url}} -e RATE_PER_SEC={{rate_per_sec}} -e DURATION_SEC={{duration_sec}} --out json={{output_file}} {{config_file}}"
         }
         return null
     }
 
+    private fun isDockerImagePresent(image: String): Boolean {
+        return try {
+            val proc = ProcessBuilder("docker", "image", "inspect", image).redirectErrorStream(true).start()
+            proc.waitFor() == 0
+        } catch (_: Exception) { false }
+    }
+
     private fun makeAdapter(): CatalogAdapter {
         val cmd = findK6Command()
-        assumeTrue(cmd != null, "k6 not found (bare metal nor docker)")
+        assumeTrue(cmd != null, "k6 not found (bare metal nor docker image cached)")
 
         val toolDef = ToolDef(
             name = "k6",
@@ -78,7 +85,7 @@ class K6IntegrationTest {
         val result = adapter.run(plan)
 
         assertEquals("k6", result.tool)
-        assertEquals("completed", result.status)
+        assertEquals("completed", result.status, "should complete, error: ${result.metadata["error"]}, stdout: ${result.metadata["stdout"]}")
         assertNotNull(result.summary, "summary should not be null, error: ${result.metadata["error"]}")
         assertTrue(result.summary!!.totalRequests > 0, "should have requests")
         // httpbingo.org/get always returns 200, so no client-side failed requests.

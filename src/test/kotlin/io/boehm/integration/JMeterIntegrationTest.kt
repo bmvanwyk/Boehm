@@ -22,10 +22,10 @@ class JMeterIntegrationTest {
                 "-l {{output_file}} " +
                 "-j {{output_file}}.log"
         }
-        // Docker fallback: justb4/jmeter
+        // Docker fallback (podman needs fully-qualified) — skip if image not cached and no network
         val docker = System.getenv("PATH")?.split(File.pathSeparator)?.firstOrNull { File("$it/docker").exists() }
-        if (docker != null) {
-            return "docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} -v {{output_file}}.log:{{output_file}}.log justb4/jmeter:5.6.3 " +
+        if (docker != null && isDockerImagePresent("docker.io/justb4/jmeter:5.6.3")) {
+            return "docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} -v {{output_file}}.log:{{output_file}}.log docker.io/justb4/jmeter:5.6.3 " +
                 "-Jtarget_url={{target_url}} " +
                 "-Jthreads={{threads}} " +
                 "-Jduration_sec={{duration_sec}} " +
@@ -36,9 +36,16 @@ class JMeterIntegrationTest {
         return null
     }
 
+    private fun isDockerImagePresent(image: String): Boolean {
+        return try {
+            val proc = ProcessBuilder("docker", "image", "inspect", image).redirectErrorStream(true).start()
+            proc.waitFor() == 0
+        } catch (_: Exception) { false }
+    }
+
     private fun makeAdapter(): CatalogAdapter {
         val cmd = findJMeterCommand()
-        assumeTrue(cmd != null, "JMeter not found (bare metal nor docker)")
+        assumeTrue(cmd != null, "JMeter not found (bare metal nor docker image cached)")
 
         val toolDef = ToolDef(
             name = "jmeter",
@@ -83,7 +90,7 @@ class JMeterIntegrationTest {
         val result = adapter.run(plan)
 
         assertEquals("jmeter", result.tool)
-        assertEquals("completed", result.status)
+        assertEquals("completed", result.status, "should complete, error: ${result.metadata["error"]}, stdout: ${result.metadata["stdout"]}")
         assertNotNull(result.summary, "summary should not be null, error: ${result.metadata["error"]}")
         assertTrue(result.summary!!.totalRequests > 0, "should have requests")
         assertEquals(0.0, result.summary!!.errorRatePct, 0.001, "should have 0% errors against httpbin")
