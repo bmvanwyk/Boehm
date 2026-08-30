@@ -122,11 +122,12 @@ class CatalogAdapter(
         val configFile = configAndOutput.first
         val resolvedOutputPath = configAndOutput.second
 
-        // Build substitution map for command template
+        // Build substitution map for command template — always use base outputFile for {{output_file}},
+        // not the resolved Gatling path (which is {{output_file}}.results/js/global_stats.json)
         val subs = mutableMapOf<String, String>()
         subs.putAll(overrides)
         if (configFile != null) subs["config_file"] = configFile.absolutePath
-        subs["output_file"] = resolvedOutputPath ?: outputFile.absolutePath
+        subs["output_file"] = outputFile.absolutePath
 
         // Execute command, enforcing the test plan timeout
         val rawCommand = commandOverride ?: toolDef.run.command

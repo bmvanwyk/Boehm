@@ -318,17 +318,11 @@ class BoehmServerTest {
 
     @Test
     fun `get_run_progress reports estimated progress for running run`() = runBlocking {
-        registerTulipHttpGet()
-        val args = buildJsonObject {
-            put("tool", "tulip"); put("test_name", "prog-test")
-            putJsonObject("test_plan") {
-                put("type", "http"); put("profile", "http-get")
-                put("target_url", "https://example.com")
-                put("duration_sec", 100); put("warmup_sec", 50); put("timeout_sec", 200)
-            }
-        }
-        val queued = gson.fromJson(contentText(handlers.runTest(request(args))), Map::class.java)
-        val runId = queued["runId"] as String
+        // Avoid race with scheduler by inserting directly (no runTest/adapter execution)
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val planJson = """{"type":"http","profile":"http-get","targetUrl":"https://example.com","ratePerSec":50,"durationSec":100,"warmupSec":50,"timeoutSec":200,"parameters":{}}"""
+        val sid = store.insertScenario("tulip", "prog-test", planJson)!!
+        val runId = store.insertRun(sid, "tulip")!!
         store.updateRunStatus(runId, "running")  // sets started_at = now
 
         val json = gson.fromJson(contentText(handlers.getRunProgress(request(
@@ -343,15 +337,10 @@ class BoehmServerTest {
 
     @Test
     fun `get_run_progress reports completed at 100 pct`() = runBlocking {
-        registerTulipHttpGet()
-        val args = buildJsonObject {
-            put("tool", "tulip"); put("test_name", "prog-done")
-            putJsonObject("test_plan") {
-                put("type", "http"); put("profile", "http-get"); put("target_url", "https://example.com")
-            }
-        }
-        val queued = gson.fromJson(contentText(handlers.runTest(request(args))), Map::class.java)
-        val runId = queued["runId"] as String
+        store.insertAdapter("tulip", """["http"]""", "0.1.0", """["0.x"]""")
+        val planJson = """{"type":"http","profile":"http-get","targetUrl":"https://example.com","ratePerSec":50,"durationSec":30,"warmupSec":5,"timeoutSec":60,"parameters":{}}"""
+        val sid = store.insertScenario("tulip", "prog-done", planJson)!!
+        val runId = store.insertRun(sid, "tulip")!!
         store.updateRunStatus(runId, "completed")
 
         val json = gson.fromJson(contentText(handlers.getRunProgress(request(

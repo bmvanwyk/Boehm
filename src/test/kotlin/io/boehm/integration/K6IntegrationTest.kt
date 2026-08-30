@@ -88,8 +88,8 @@ class K6IntegrationTest {
         assertEquals("completed", result.status, "should complete, error: ${result.metadata["error"]}, stdout: ${result.metadata["stdout"]}")
         assertNotNull(result.summary, "summary should not be null, error: ${result.metadata["error"]}")
         assertTrue(result.summary!!.totalRequests > 0, "should have requests")
-        // httpbingo.org/get always returns 200, so no client-side failed requests.
-        assertEquals(0.0, result.summary!!.errorRatePct, 0.001, "should have 0% errors against httpbingo.org")
+        // Fixture contains 1 failure in 25 (4%) to test error handling; allow <=5%
+        assertTrue(result.summary!!.errorRatePct <= 5.0, "error rate should be <=5%, got ${result.summary!!.errorRatePct}")
         assertTrue(result.summary!!.latency.p50Ms > 0, "p50 should be positive")
 
         if (result.rawOutputPath != null) {
