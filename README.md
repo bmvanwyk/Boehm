@@ -2,83 +2,83 @@
 
 **Performance Testing AI Engineer — an MCP server that runs performance tests across multiple tools and analyzes results.**
 
-Named after [Barry Boehm](https://en.wikipedia.org/wiki/Barry_Boehm).
+Named after [Barry Boehm](https://en.wikipedia.org/wiki/Barry_Boehm). The server speaks JSON-RPC 2.0 over stdio via the official MCP Kotlin SDK and persists every run in SQLite.
 
 ## Prerequisites
 
-- **Java 21** — install via SDKMAN: `sdk install java 21.0.7-tem`
+- **Java 25** — managed via sdkman (`.sdkmanrc` pins `java=25.0.2-open`, `kotlin=2.4.10`): `sdk env`
 - **Tulip CLI** (for Tulip adapter) — cloned to `~/git/Tulip`, built with `./gradlew build`
-- **JMeter** (for JMeter adapter) — install [Apache JMeter 5.6.3](https://jmeter.apache.org/download_jmeter.cgi), ensure `jmeter` is on PATH and `JAVA_HOME` is set
-- **k6** (for k6 adapter) — install via `brew install k6`, the [official deb repo](https://grafana.com/docs/k6/latest/set-up/install-k6/), or `go install go.k6.io/k6@latest`; ensure `k6` is on PATH
+- **JMeter** (for JMeter adapter) — install [Apache JMeter 5.6.3](https://jmeter.apache.org/download_jmeter.cgi), ensure `jmeter` on `PATH` and `JAVA_HOME` set
+- **k6** (for k6 adapter) — `brew install k6`, the [official deb repo](https://grafana.com/docs/k6/latest/set-up/install-k6/), or `go install go.k6.io/k6@latest`; ensure `k6` on `PATH`
+
+Only Tulip/k6/JMeter have parsers and are registered at runtime. Gatling, vegeta, and wrk are declared in `catalog.yaml` but skipped until parsers exist.
 
 ## Quick start
 
 ```bash
-# Build (compile + test)
+# Build (compile + test + coverage)
 ./gradlew build
 
-# Run unit tests only (fast, no Tulip needed)
+# Unit tests only (fast, no external tools needed)
 ./gradlew test
 
-# Run integration test (requires ~/git/Tulip with Tulip built)
+# Coverage report (HTML at build/reports/jacoco/test/html/)
+./gradlew test jacocoTestReport
+
+# Integration tests (each skips gracefully if its binary is absent)
 ./gradlew test --tests "io.boehm.integration.TulipIntegrationTest"
-
-# Run JMeter integration test (requires JMeter on PATH + JAVA_HOME set)
 ./gradlew test --tests "io.boehm.integration.JMeterIntegrationTest"
-
-# Run k6 integration test (requires k6 on PATH; skips gracefully if absent)
 ./gradlew test --tests "io.boehm.integration.K6IntegrationTest"
 
-# Start the MCP server (stdio)
+# Start the MCP server (stdio); token required
 ./gradlew run --args="--token=boehm_sk_$(openssl rand -hex 16)"
+# or BOEHM_TOKEN=... ./gradlew run
+# DB and catalog paths can be overridden:
+# BOEHM_DB_PATH=/tmp/boehm.db BOEHM_CATALOG_PATH=/path/to/catalog.yaml ./gradlew run --args="--token=..."
 ```
 
 ## Project structure
 
 ```
 Boehm/
-├── build.gradle.kts              # Kotlin/JVM, Gson, SQLite, SnakeYAML
-├── catalog.yaml                   # Tool index: profiles, overrides, parsers
+├── build.gradle.kts              # Kotlin 2.4.10 / JVM 25, Gson, SQLite, SnakeYAML, MCP SDK 0.15.0
+├── settings.gradle.kts
+├── catalog.yaml                  # Tool index: profiles, overrides, parsers
 ├── profiles/
-│   ├── tulip/
-│   │   ├── http-get.jsonc         # Tulip config template (JSON with overrides)
-│   │   └── demo.jsonc
-│   ├── k6/http-get.js             # k6 script template (env vars)
-│   ├── jmeter/http-get.jmx        # JMeter plan template (properties)
-│   └── gatling/http-get.scala     # Gatling simulation template (system props)
-├── src/
-│   ├── main/kotlin/io/boehm/
-│   │   ├── Main.kt                # stdio entry point, catalog loader
-│   │   ├── catalog/
-│   │   │   ├── CatalogModels.kt   # Data classes for catalog.yaml
-│   │   │   ├── CatalogLoader.kt   # Parse catalog.yaml → typed models
-│   │   │   └── CatalogAdapter.kt  # Generic PerfToolAdapter (catalog-driven)
-│   │   ├── core/
-│   │   │   ├── BoehmToolHandlers.kt # 9 MCP tool handlers (suspend funs)
-│   │   │   ├── Orchestrator.kt    # Route test plans → adapters
-│   │   │   ├── Scheduler.kt       # Serial run queue
-│   │   │   └── Store.kt           # SQLite (adapters, runs, schemas)
-│   │   ├── model/                 # TestPlan, RunResult, Summary, Latency
-│   │   ├── adapters/tulip/
-│   │   │   └── TulipParser.kt     # Native Tulip JSON → RunResult
-│   │   ├── adapters/jmeter/
-│   │   │   └── JMeterParser.kt   # JMeter JTL CSV → RunResult
-│   │   └── adapters/k6/
-│   │       └── K6Parser.kt       # k6 NDJSON → RunResult
-│   └── test/
-│       ├── adapter/               # TulipAdapterTest, JMeterParserTest, K6ParserTest, TulipParserTest
-│   │   ├── catalog/               # AdapterBuilder, CatalogLoader tests
-│   │   ├── core/                  # BoehmToolHandlers (BoehmServerTest), Comparator, Orchestrator, Scheduler, Store
-│       ├── fixtures/
-│       │   ├── mock-tulip.sh      # Mock CLI for unit tests
-│       │   ├── run-real-tulip.sh  # Wrapper for integration test
-│       │   ├── tulip-sample-output.json
-│       │   ├── jmeter-sample-output.csv
-│       │   └── k6-sample-output.jsonl
-│       └── integration/
-│           ├── TulipIntegrationTest.kt
-│           ├── JMeterIntegrationTest.kt
-│           └── K6IntegrationTest.kt
+│   ├── tulip/http-get.jsonc, demo.jsonc
+│   ├── k6/http-get.js
+│   ├── jmeter/http-get.jmx
+│   └── gatling/http-get.scala
+├── src/main/kotlin/io/boehm/
+│   ├── Main.kt                   # stdio entry point, catalog loader, parser registry, 9 tool registrations
+│   ├── catalog/
+│   │   ├── CatalogModels.kt      # Catalog, ToolDef, ProfileDef, OutputDef, OverrideDef
+│   │   ├── CatalogLoader.kt      # SnakeYAML → typed models
+│   │   ├── AdapterBuilder.kt     # buildAdapters(): only profiles with a parser
+│   │   └── CatalogAdapter.kt     # PerfToolAdapter: template + overrides + bash -c + timeout + parse
+│   ├── core/
+│   │   ├── BoehmToolHandlers.kt  # 9 MCP tool handlers + real progress estimation
+│   │   ├── Orchestrator.kt       # SubmitResult / CancelResult, scenario UPSERT, scheduler lifecycle
+│   │   ├── Scheduler.kt          # serial queue, failInterruptedRuns, cancellation
+│   │   ├── Comparator.kt         # direction-aware baseline comparison (10% threshold)
+│   │   └── Store.kt              # SQLite (adapters, scenarios, runs, baselines), synchronized
+│   ├── model/
+│   │   ├── TestPlan.kt           # type, profile, targetUrl, rate/duration/warmup/timeout, parameters
+│   │   ├── RunResult.kt          # RunResult, Summary, Latency (incl. meanMs/stdevMs)
+│   │   ├── ProgressEvent.kt      # progress / server status types
+│   │   └── Stats.kt              # mean + population stdev
+│   └── adapters/
+│       ├── PerfToolAdapter.kt    # interface (name, profile, validate, run)
+│       ├── tulip/TulipParser.kt  # Tulip JSON → RunResult
+│       ├── jmeter/JMeterParser.kt # JTL CSV → RunResult
+│       └── k6/K6Parser.kt        # NDJSON → RunResult
+└── src/test/kotlin/io/boehm/
+    ├── adapter/                  # TulipAdapterTest, TulipParserTest, JMeterParserTest, K6ParserTest
+    ├── catalog/                  # AdapterBuilderTest, CatalogLoaderTest, CatalogAdapterValidationTest
+    ├── core/                     # BoehmServerTest, ComparatorTest, OrchestratorTest, SchedulerTest, StoreTest
+    ├── model/                    # RunResultTest, ProgressEventTest
+    ├── fixtures/                 # mock-tulip.sh, tulip-sample-output.json, jmeter-sample-output.csv, k6-sample-output.jsonl
+    └── integration/              # TulipIntegrationTest, JMeterIntegrationTest, K6IntegrationTest
 ```
 
 ## Using with opencode
@@ -101,50 +101,45 @@ use boehm to cancel run <runId>
 
 | Tool | Input | Output |
 |------|-------|--------|
-| `list_adapters` | — | Available tools + supported profiles |
-| `run_test` | `tool`, `test_name`, `test_plan` (contains `type`, `profile`, `target_url`, `rate_per_sec`, `duration_sec`, `warmup_sec`, plus tool-specific params) | `runId`, status `queued` |
-| `get_run` | `run_id` | Full result with latency (incl. mean/stdev), throughput, error rate |
-| `get_run_progress` | `run_id` | Status, real progress %, current stage, elapsed/remaining estimate |
-| `server_status` | — | Queue depth, currently running (+ progress), uptime, adapters |
-| `list_runs` | `tool?`, `test_name?`, `limit?` | Recent completed/failed/cancelled runs, newest first |
-| `tag_baseline` | `run_id` | Tags a completed run as its scenario's baseline |
-| `compare_runs` | `run_id`, `baseline_run_id?` | Per-metric deltas vs baseline with regression/improvement flags |
-| `cancel_run` | `run_id` | Cancels a queued/pending run or kills a running one |
+| `list_adapters` | — | Registered adapters (only profiles with parsers) + supported types |
+| `run_test` | `tool`, `test_name`, `test_plan` (`type`, `profile`, `target_url`, `rate_per_sec`, `duration_sec`, `warmup_sec`, `timeout_sec` + tool-specific params) | `runId`, `status: queued` (or `-32000`/`-32001` with `validation_errors`) |
+| `get_run` | `run_id` | Full `RunResult` with latency (incl. `meanMs`/`stdevMs`), throughput, error rate, `rawOutputPath`, `metadata` |
+| `get_run_progress` | `run_id` | `status`, `progressPct`, `currentStage` (`warmup`/`measuring`/`completed`), `elapsedSec`/`estimatedRemainingSec`, `rollingSummary`; derived from `started_at` + `warmupSec`/`durationSec` |
+| `server_status` | — | `status` (`idle`/`running`), `queueDepth`, `currentlyRunning` (with real progress), `queuedRuns`, `uptimeSec`, `adapters` |
+| `list_runs` | `tool?`, `test_name?`, `limit?` (default 20, max 100) | Recent `completed`/`failed`/`cancelled` runs, newest first, with summaries |
+| `tag_baseline` | `run_id` | Tags a `completed` run with a summary as its scenario's baseline (`UPSERT` on `scenario_id`) |
+| `compare_runs` | `run_id`, `baseline_run_id?` | Per-metric `deltaPct` + `verdict` (`regression`/`improvement`/`unchanged`, >10% threshold, direction-aware), plus `regressions`/`improvements` lists |
+| `cancel_run` | `run_id` | Cancels `pending`/`queued` (flipped to `cancelled`) or `running` (subprocess tree killed, recorded as `cancelled`) |
 
-Adapters whose output schema has no parser yet (Gatling, vegeta, wrk) are not
-registered — they appear in `catalog.yaml` but not in `list_adapters` until a
-parser is implemented.
+Profiles whose `output.schema` has no parser (Gatling `gatling-stats`, vegeta `vegeta-report`, wrk `wrk-text`) are skipped at startup with a stderr note and never appear in `list_adapters`.
 
 ## How it works
 
-1. An agent sends `tools/call` (run_test) with a tool name, profile, and parameter overrides via the MCP protocol
-2. The official [MCP Kotlin SDK](https://github.com/modelcontextprotocol/kotlin-sdk) `Server` dispatches the call to `BoehmToolHandlers.runTest`, which constructs a `TestPlan`
-3. `Orchestrator` validates the plan and queues the run in SQLite (serial execution — one at a time for clean measurements)
-4. `CatalogAdapter` loads the profile template from `profiles/<tool>/`, applies overrides via JSON path (JSON-based tools) or env vars (script-based tools), shell-execs the CLI command, and captures output
-5. Results are parsed into a normalized `RunResult` and persisted in SQLite
-6. The agent polls `get_run` or `get_run_progress` until complete
-
-The MCP SDK handles the protocol layer: `initialize` handshake, `capabilities`, `tools/list` discovery, `notifications/initialized`, content envelopes, and JSON-RPC parsing — so Boehm is fully discoverable and standards-compliant for any MCP client (Claude Code, opencode, etc.).
+1. Agent sends `tools/call` (`run_test`) with `tool`, `test_name`, and `test_plan` overrides.
+2. `BoehmToolHandlers.runTest` builds a `TestPlan`; `Orchestrator.submitRun` looks up `tool:profile`, validates (including `timeoutSec >= durationSec + warmupSec + 10`), upserts the scenario, inserts a `queued` run, and ensures the `Scheduler` is running.
+3. `Scheduler` (single daemon thread, polls every 500 ms) dequeues the oldest `pending`/`queued` run, marks `running` (`started_at` set), and calls `CatalogAdapter.run(plan, onProcessStart)`.
+4. `CatalogAdapter` loads the profile template from `profiles/<tool>/`, applies overrides via JSON path (JSON/JSONC) or copies as-is (script templates, overrides via `{{target_url}}`/`{{rate_per_sec}}` etc. in the command), sanitizes values, substitutes `{{config_file}}`/`{{output_file}}`, executes `bash -c` with `timeoutSec` enforcement, and parses the output via the schema's parser (`tulip-results`/`k6-jsonl`/`jmeter-csv`).
+5. `Scheduler` persists the normalized `RunResult` (or `failed`/`cancelled`) in SQLite; `Store` access is serialized behind one lock and timestamps are ISO-8601.
+6. Agent polls `get_run` or `get_run_progress` (computed from `started_at` + plan) until `completed`/`failed`/`cancelled`.
 
 ## Test catalog
 
-`catalog.yaml` defines every test profile across all supported tools:
+`catalog.yaml` declares every profile across all supported tools. `AdapterBuilder` registers only those with a parser:
 
 | Tool | Profiles | Status |
 |------|----------|--------|
-| Tulip | `http-get`, `demo` | Implemented |
-| k6 | `http-get` | Implemented |
-| JMeter | `http-get` | Implemented |
-| Gatling | `http-get` | Designed (parser needed) |
-| vegeta | `http-get` | Designed (parser needed) |
-| wrk | `http-get` | Designed (parser needed) |
+| Tulip | `http-get`, `demo` | Implemented (`TulipParser`, `tulip-results`) |
+| k6 | `http-get` | Implemented (`K6Parser`, `k6-jsonl`) |
+| JMeter | `http-get` | Implemented (`JMeterParser`, `jmeter-csv`) |
+| Gatling | `http-get` | Catalog-only (no parser for `gatling-stats`) |
+| vegeta | `http-get` | Catalog-only (no parser for `vegeta-report`) |
+| wrk | `http-get` | Catalog-only (no parser for `wrk-text`) |
 
-Each profile declares a static config template, overridable params, and the output path/format so the adapter knows where to find and how to parse results.
+Each profile declares a static config template, overridable params, and the output `path`/`format`/`schema` so `CatalogAdapter` knows where to find and how to parse results.
 
-## Specs
+## Quality and docs
 
-- [Phase 1 spec](docs/superpowers/specs/2026-07-20-boehm-phase-1.md)
-- [Architecture](docs/architecture.md)
-- [Full vision](docs/superpowers/specs/2026-07-20-boehm-vision.md)
-- [`catalog.yaml`](catalog.yaml) — test profile index
-- [`AGENTS.md`](AGENTS.md) — agent guide
+- Coverage: minimum 80% instructions (excludes `MainKt`). Run `./gradlew test jacocoTestReport` and check `build/reports/jacoco/test/html/`.
+- Architecture details, state model, scheduler, and adapter contract: `docs/architecture.md`.
+- Catalog and profile conventions: `catalog.yaml` and `profiles/<tool>/`.
+- Agent guide: `AGENTS.md`.

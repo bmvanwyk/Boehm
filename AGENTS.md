@@ -16,11 +16,11 @@
 
 | Document | Purpose |
 |----------|---------|
-| `docs/architecture.md` | System architecture with Mermaid diagrams, component map, data flows, ADRs |
-| `docs/superpowers/specs/2026-07-20-boehm-phase-1.md` | Active Phase 1 spec: MCP tools, adapter interface, schema, acceptance criteria |
-| `docs/superpowers/specs/2026-07-20-boehm-vision.md` | Full product vision (Phases 2-7 reference) |
+| `docs/architecture.md` | System architecture with Mermaid diagrams, component map, data flows |
+| `catalog.yaml` | Tool and profile index (the source of truth for adapters) |
+| `README.md` | Setup, usage, project layout, and MCP tool reference |
 
-Read the design spec before changing behaviour.
+Read `docs/architecture.md` before changing behaviour.
 
 ## Implemented Adapters
 
@@ -96,7 +96,7 @@ Designed but not yet implemented: Gatling, vegeta, wrk.
 
 ## Design Status
 
-Design finalized. See implementation plans for current phase.
+Design finalized. See `docs/architecture.md` for current implementation.
 
 ## What Not To Do
 

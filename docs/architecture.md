@@ -1,116 +1,102 @@
-# Architecture — Phase 1 (revised)
+# Architecture — Boehm
 
-## Review Summary
-
-The original proposal is directionally correct, but it is still too optimistic for a first MCP server release. For Phase 1, the design should favor simplicity, durability, and predictable behavior over extensibility. The server must be reliable under the MCP stdio transport, survive process restarts, and avoid turning a small tool into a general-purpose execution platform.
-
-The biggest design corrections are:
-
-- Make execution asynchronous from the start. `run_test` should return quickly with a persisted run record, not block until the load test completes.
-- Treat progress as durable state, not as a transient in-memory object. A stdio server can restart, and the agent may poll after a delay.
-- Keep the adapter boundary narrow. The adapter should own process execution, output capture, and parsing; the rest of the system should only consume normalized state.
-- Fail fast on invalid input and tool absence. A Phase 1 server should be explicit and predictable, not attempt to recover from every failure mode.
-
----
+Boehm is a Kotlin/JVM MCP server that runs performance tests via external CLI tools, normalizes results, and persists them in SQLite. All tool invocation is catalog-driven through a single generic adapter (`CatalogAdapter`). The server speaks JSON-RPC 2.0 over stdio via the official MCP Kotlin SDK (`io.modelcontextprotocol:kotlin-sdk:0.15.0`).
 
 ## System Context
 
 ```mermaid
 graph TB
-    Agent["AI Agent<br/>(Claude Code, Cline, etc.)"]
-    Boehm["Boehm MCP Server<br/>Kotlin/JVM"]
+    Agent["AI Agent<br/>(opencode, Claude Code, etc.)"]
+    Boehm["Boehm MCP Server<br/>Kotlin/JVM 25"]
     Tulip["Tulip CLI"]
+    K6["k6"]
+    JMeter["JMeter"]
+    Other["Gatling / vegeta / wrk<br/>(catalog-only until parser exists)"]
     Target["Target System<br/>(e.g. httpbin.org)"]
     SQLite[(SQLite<br/>~/.boehm/boehm.db)]
-    OutputDir[(Raw Outputs<br/>~/.boehm/outputs/)]
+    OutputDir[(Raw Outputs<br/>~/.boehm/outputs/&lt;tool&gt;/)]
 
-    Agent -- "JSON-RPC 2.0 over stdio<br/>startup token (transport trust)" --> Boehm
-    Boehm -- "spawn + capture" --> Tulip
+    Agent -- "JSON-RPC 2.0 over stdio<br/>token at startup" --> Boehm
+    Boehm -- "bash -c + capture" --> Tulip
+    Boehm -- "bash -c + capture" --> K6
+    Boehm -- "bash -c + capture" --> JMeter
+    Boehm -. "not registered (no parser)" .-> Other
     Tulip -- "HTTP load" --> Target
-    Boehm -- "persist runs, progress, metadata" --> SQLite
-    Boehm -- "write raw stdout/stderr" --> OutputDir
+    K6 -- "HTTP load" --> Target
+    JMeter -- "HTTP load" --> Target
+    Boehm -- "persist runs, scenarios, baselines" --> SQLite
+    Boehm -- "write raw stdout / output files" --> OutputDir
 ```
-
----
 
 ## Core Design Principles
 
-1. The MCP server is a request/response entrypoint, not the execution engine itself.
-   - The stdio loop should accept requests, validate them, and hand off work to a background executor.
-   - Tool calls should not block the event loop for long-running tests.
-
-2. The authoritative source of truth is SQLite.
-   - Runs, queue state, progress snapshots, and errors should be persisted.
-   - In-memory state is only a cache.
-
-3. The adapter boundary is intentionally small.
-   - `PerfToolAdapter` should expose `validate`, `run`, and optionally a progress callback.
-   - No other layer should need to know about Tulip-specific stdout formats.
-
-4. Phase 1 should be opinionated and boring.
-   - One adapter mechanism: catalog-driven `CatalogAdapter`.
-   - One execution policy: serial execution.
-   - One auth model: token required at startup; transport trust delegated to the spawner.
-
----
+1. **MCP server is the entrypoint, not the execution engine.** `run_test` validates, persists a `queued` run, and returns immediately. A background scheduler serially executes runs so the stdio loop never blocks.
+2. **SQLite is the source of truth.** Runs, queue state, baselines, and errors are persisted. In-memory state is a cache. The DB path is configurable via `BOEHM_DB_PATH` (`~/.boehm/boehm.db` default, `BOEHM_CATALOG_PATH` for the catalog).
+3. **Adapter boundary is narrow.** `PerfToolAdapter` exposes `validate` and `run` (with an optional `onProcessStart` callback for cancellation). All tool-specific work (template rendering, command substitution, parsing) lives behind that interface.
+4. **Catalog-driven.** Every tool and profile is declared in `catalog.yaml`. No hardcoded adapters. `AdapterBuilder` registers only profiles whose `output.schema` has a parser (`tulip-results`, `jmeter-csv`, `k6-jsonl`) — others (Gatling/vegeta/wrk) appear in the catalog but not in `list_adapters`.
+5. **Local-first and serial.** One run at a time prevents measurement noise. No cloud dependencies. All `Store` access is serialized behind a single lock (shared SQLite `Connection` is not thread-safe).
+6. **Measurement integrity.** Resubmitting a scenario name upserts its stored plan; timestamps are ISO-8601 (`Instant.now().toString()`) everywhere so lexicographic ordering is correct; timeout is validated before queuing.
 
 ## Component Architecture
 
 ```mermaid
 graph TB
     subgraph "Protocol Layer"
-        McpServer["McpServer (MCP Kotlin SDK)<br/>initialize, tools/list, tools/call"]
-        BoehmToolHandlers["BoehmToolHandlers.kt<br/>9 tool handlers"]
+        McpServer["Server (MCP Kotlin SDK)<br/>initialize, tools/list, tools/call"]
+        Handlers["BoehmToolHandlers.kt<br/>9 tool handlers + progress estimation"]
     end
 
     subgraph "Application Layer"
-        Orchestrator["Orchestrator.kt<br/>route test plans, manage runs"]
-        Scheduler["Scheduler.kt<br/>serial queue + worker"]
-        Store["Store.kt<br/>SQLite CRUD"]
+        Orchestrator["Orchestrator.kt<br/>route test plans, SubmitResult / CancelResult"]
+        Scheduler["Scheduler.kt<br/>serial queue + subprocess cancellation"]
+        Store["Store.kt<br/>SQLite CRUD, synchronized"]
+        Comparator["Comparator.kt<br/>direction-aware delta comparison"]
     end
 
     subgraph "Adapter Layer"
-        AdapterInterface["PerfToolAdapter"]
-        CatalogLoader["CatalogLoader.kt<br/>parse catalog.yaml"]
-        CatalogAdapter["CatalogAdapter.kt<br/>template + overrides + exec"]
-        TulipParser["TulipParser.kt<br/>native JSON → RunResult"]
-    JMeterParser["JMeterParser.kt<br/>JTL CSV → RunResult"]
-    K6Parser["K6Parser.kt<br/>k6 NDJSON → RunResult"]
+        AdapterIface["PerfToolAdapter<br/>name, profile, validate, run"]
+        CatalogLoader["CatalogLoader.kt<br/>SnakeYAML → Catalog"]
+        AdapterBuilder["AdapterBuilder.kt<br/>buildAdapters()"]
+        CatalogAdapter["CatalogAdapter.kt<br/>template + overrides + bash -c + timeout"]
+        TulipParser["TulipParser.kt<br/>JSON → RunResult"]
+        JMeterParser["JMeterParser.kt<br/>JTL CSV → RunResult"]
+        K6Parser["K6Parser.kt<br/>NDJSON → RunResult"]
     end
 
     subgraph "Catalog"
         CatalogYaml["catalog.yaml<br/>tool definitions + profiles"]
-        Templates["profiles/&lt;tool&gt;/*<br/>config templates"]
+        Templates["profiles/&lt;tool&gt;/*<br/>config / script templates"]
     end
 
     subgraph "Model"
-        Models["TestPlan, RunResult, ProgressEvent, Summary, Latency"]
+        Models["TestPlan, RunResult, Summary, Latency, Stats<br/>ProgressEvent, ServerStatus"]
     end
 
     Agent["AI Agent (MCP client)"]
 
     CatalogLoader --> CatalogYaml
+    AdapterBuilder --> CatalogLoader
     Agent --> McpServer
-    McpServer --> BoehmToolHandlers
-    BoehmToolHandlers --> Orchestrator
+    McpServer --> Handlers
+    Handlers --> Orchestrator
+    Handlers --> Store
+    Handlers --> Comparator
     Orchestrator --> Scheduler
     Orchestrator --> Store
     Scheduler --> CatalogAdapter
+    Scheduler --> Store
     CatalogAdapter --> CatalogLoader
     CatalogAdapter --> Templates
     CatalogAdapter --> TulipParser
     CatalogAdapter --> JMeterParser
     CatalogAdapter --> K6Parser
-    CatalogAdapter --> Models
     TulipParser --> Models
     JMeterParser --> Models
     K6Parser --> Models
     Store --> SQLite[(SQLite)]
 ```
 
----
-
-## Request Flow
+## Request Flows
 
 ### Initialize
 
@@ -119,10 +105,12 @@ sequenceDiagram
     participant Agent
     participant McpServer
 
-    Note over McpServer: Server starts only with --token=<token> or BOEHM_TOKEN set.
+    Note over Agent,McpServer: Token required at startup
     Agent->>McpServer: initialize
-    McpServer-->>Agent: initialized
+    McpServer-->>Agent: initialized (serverInfo: boehm 0.1.0, capabilities.tools)
 ```
+
+Token is validated at startup only; stdio transport trust is delegated to the spawner. There is no per-request auth.
 
 ### run_test
 
@@ -130,23 +118,29 @@ sequenceDiagram
 sequenceDiagram
     participant Agent
     participant McpServer
-    participant RunService
-    participant Scheduler
+    participant Handlers
+    participant Orchestrator
     participant Store
+    participant Scheduler
     participant CatalogAdapter
 
-    Agent->>McpServer: tools/call run_test { tool, test_plan }
-    McpServer->>RunService: createRun(testPlan)
-    RunService->>Store: INSERT pending run
-    Store-->>RunService: run_id
-    RunService-->>McpServer: { runId, status: "queued" }
+    Agent->>McpServer: tools/call run_test
+    McpServer->>Handlers: runTest()
+    Handlers->>Orchestrator: submitRun(tool, testName, TestPlan)
+    Orchestrator->>Orchestrator: adapter lookup tool:profile, validate, timeout check
+    Orchestrator->>Store: INSERT scenario (UPSERT plan) + INSERT run + queued
+    Store-->>Orchestrator: runId
+    Orchestrator->>Scheduler: ensureScheduler() start() if needed
+    Orchestrator-->>Handlers: Queued(runId)
+    Handlers-->>McpServer: runId queued
     McpServer-->>Agent: result
-
-    RunService->>Scheduler: enqueue(run_id)
-    Scheduler->>CatalogAdapter: execute(run_id, testPlan)
-    CatalogAdapter->>CatalogAdapter: load template, apply overrides, spawn CLI, capture
-    CatalogAdapter->>Store: update status/progress/final result
+    Scheduler->>CatalogAdapter: run plan
+    CatalogAdapter->>CatalogAdapter: render template and parse
+    CatalogAdapter-->>Scheduler: RunResult
+    Scheduler->>Store: updateRunStatus
 ```
+
+`Orchestrator.submitRun` returns a sealed `SubmitResult`: `Queued`, `UnknownAdapter` (-32000), `UnknownProfile` (-32001), `Invalid` (-32001 with `validation_errors`).
 
 ### get_run / get_run_progress / server_status
 
@@ -154,16 +148,19 @@ sequenceDiagram
 sequenceDiagram
     participant Agent
     participant McpServer
-    participant RunService
+    participant Handlers
     participant Store
 
-    Agent->>McpServer: tools/call get_run|get_run_progress|server_status
-    McpServer->>RunService: read state
-    RunService->>Store: SELECT latest snapshot
-    Store-->>RunService: persisted state
-    RunService-->>McpServer: response
-    McpServer-->>Agent: result
+    Agent->>McpServer: tools/call get_run
+    McpServer->>Handlers: corresponding handler
+    Handlers->>Store: SELECT getRun
+    Store-->>Handlers: persisted rows
+    Handlers->>Handlers: estimateProgress
+    Handlers-->>McpServer: result JSON
+    McpServer-->>Agent: CallToolResult
 ```
+
+Progress (`progressPct`, `currentStage`, `elapsedSec`, `estimatedRemainingSec`) is computed at query time from `started_at` and the scenario's stored `TestPlan` (`warmupSec` + `durationSec`), not from a stored snapshot. `completed` returns `100.0` / `completed`; non-running returns `0.0`.
 
 ### History, baselines, comparison, cancellation
 
@@ -173,74 +170,69 @@ sequenceDiagram
     participant McpServer
     participant Handlers
     participant Store
+    participant Scheduler
 
-    Agent->>McpServer: tools/call list_runs { tool?, test_name?, limit? }
-    McpServer->>Store: finished runs, newest first
-    Agent->>McpServer: tools/call tag_baseline { run_id }
-    McpServer->>Store: UPSERT baselines(scenario_id -> run_id)
-    Agent->>McpServer: tools/call compare_runs { run_id, baseline_run_id? }
-    McpServer->>Handlers: Comparator.compare(run, baseline)
-    McpServer-->>Agent: per-metric deltas + regression/improvement flags
-    Agent->>McpServer: tools/call cancel_run { run_id }
-    alt queued/pending
-        McpServer->>Store: status = cancelled (never executes)
+    Agent->>McpServer: tools/call list_runs
+    McpServer->>Handlers: listRuns()
+    Handlers->>Store: listRecentRuns
+    Store-->>Handlers: rows
+    Handlers-->>Agent: runs
+
+    Agent->>McpServer: tools/call tag_baseline
+    McpServer->>Handlers: tagBaseline()
+    Handlers->>Store: getRun and setBaseline UPSERT
+    Handlers-->>Agent: taggedAsBaseline true
+
+    Agent->>McpServer: tools/call compare_runs
+    McpServer->>Handlers: compareRuns()
+    Handlers->>Store: getRun and getBaselineRunId
+    Handlers->>Handlers: Comparator.compare
+    Handlers-->>Agent: metrics regressions improvements
+
+    Agent->>McpServer: tools/call cancel_run
+    McpServer->>Handlers: cancelRun()
+    Handlers->>Store: getRun
+    alt pending or queued
+        Handlers->>Store: cancelQueuedRun
+        Handlers-->>Agent: status cancelling
     else running
-        McpServer->>Store: kill subprocess tree; status = cancelled on return
+        Handlers->>Scheduler: requestCancel
+        Scheduler->>Store: set status cancelled
+        Handlers-->>Agent: status cancelling
+    else completed
+        Handlers-->>Agent: error NotCancellable
     end
 ```
 
-`compare_runs` is direction-aware: higher throughput is an improvement,
-higher latency/error-rate a regression. Deltas beyond 10% are flagged.
-Latency metrics include mean and stdev in every parser summary.
-
----
+`compare_runs` is direction-aware: higher `throughputReqPerSec` is an improvement, lower `errorRatePct` and latency (`p50/p90/p95/p99/mean/max`) is an improvement. Deltas with `|deltaPct| > 10%` are flagged as `regression` or `improvement`; zero baselines yield `deltaPct: null` and `unchanged`. Metrics beyond threshold are listed in `regressions` / `improvements`.
 
 ## State Model
 
-The run lifecycle should be explicit and durable:
-
-```text
+```
 pending -> queued -> running -> completed
-                  \-> failed
-                  \-> cancelled
+                     \-> failed
+                     \-> cancelled
 ```
 
-Persisted fields for each run include:
+Persisted per run in `runs`:
 
-- `id`
-- `scenario_id` or equivalent name
-- `tool`
-- `status`
-- `created_at`, `started_at`, `completed_at` (ISO-8601 everywhere, so lexicographic ordering works)
-- `summary`
-- `error`
-- `raw_output_path`
-- `metadata`
+- `id` (UUID), `scenario_id` (FK → `test_scenarios`), `tool`
+- `status` (`pending` default, then `queued`, `running`, `completed`, `failed`, `cancelled`)
+- `created_at`, `started_at`, `completed_at` — ISO-8601 (`Instant.now().toString()`), written explicitly by application code (DB defaults are fallback only)
+- `summary` (JSON `Summary`), `error` (string), `raw_output_path`, `metadata` (JSON)
 
-Progress (`progress_pct`, current stage, elapsed/remaining) is computed at query
-time from `started_at` and the scenario's stored plan (warmup + duration), not
-stored as a snapshot — so it stays accurate without background writers.
-
-This is important because the server is stdio-based and may be restarted. A run should not depend on in-memory objects alone.
-
----
+`test_scenarios`: `(tool, name)` unique; `test_plan` is UPSERTed on resubmit so re-queuing a scenario name updates its plan. `baselines`: `scenario_id` PK → `run_id`, `tagged_at`.
 
 ## Scheduler and Execution Model
 
-A Phase 1 scheduler should be intentionally simple:
-
-- One worker thread executes at a time.
-- New runs are appended to a queue and marked `queued` immediately.
-- The worker dequeues the next run and moves it to `running`.
-- On completion, the worker updates the run record to `completed` or `failed`.
-
-This meets the acceptance criteria without introducing premature parallelism or cross-run interference. A future phase can add isolation groups or concurrent workers, but Phase 1 should not try to optimize beyond serial execution.
-
----
+- Single-threaded `ScheduledExecutor` (`boehm-scheduler` daemon) polls every 500 ms.
+- `start()` first calls `failInterruptedRuns()` — any `running` rows from a prior crash are marked `failed` with `interrupted: server restarted` and logged to stderr.
+- `pollQueue()` picks the oldest `pending/queued/running` row; if `running` it returns (one at a time). Missing scenario or adapter marks the run `failed` with an explanatory error.
+- On execution: marks `running` (`started_at` set once), records `activeRunId` / `activeProcess` atomically, calls `adapter.run(plan) { activeProcess.set(it) }`, then persists `summary`, `error`, `rawOutputPath`, and `metadata`. If `cancelRequested` contains the run id, the final status is rewritten to `cancelled`.
+- Exceptions during execution mark the run `failed` with `ExceptionClass: message`; the queue continues (no deadlock from swallowing exceptions).
+- `requestCancel(runId)`: `pending`/`queued` → `cancelQueuedRun` flips to `cancelled` directly; `running` only if it is the active run — kills the subprocess via `destroyForcibly()` and records cancellation on return. `Store.cancelQueuedRun` is `UPDATE ... WHERE status IN ('pending','queued')`.
 
 ## Adapter Contract
-
-The adapter interface should be narrow and deterministic:
 
 ```kotlin
 interface PerfToolAdapter {
@@ -252,151 +244,129 @@ interface PerfToolAdapter {
 
     fun validate(testPlan: TestPlan): List<ValidationError>
     fun run(testPlan: TestPlan): RunResult
-
-    /**
-     * Runs the plan. Implementations that spawn a subprocess must invoke
-     * [onProcessStart] once the process exists so the caller can cancel it.
-     */
     fun run(testPlan: TestPlan, onProcessStart: (Process) -> Unit): RunResult = run(testPlan)
 }
 ```
 
-Only catalog profiles whose output schema has a registered parser get an
-adapter instance (`buildAdapters` in `AdapterBuilder.kt`); unimplemented tools
-(gatling, vegeta, wrk) stay out of the tool surface until parsers exist.
+Only profiles whose `output.schema` has a parser get an adapter (`AdapterBuilder.buildAdapters`); unimplemented tools (Gatling `gatling-stats`, vegeta `vegeta-report`, wrk `wrk-text`) are skipped with a stderr note.
 
-The adapter is responsible for:
+`CatalogAdapter` is the sole implementation:
 
-- Loading the profile config template from `profiles/<tool>/`
-- Applying overrides via JSON path (for JSON configs like Tulip) or copying as-is (for script-based tools like k6, JMeter, Gatling)
-- Generating temporary config files and resolving output paths
-- Constructing the CLI command from `catalog.yaml` with template variable substitution (`{{config_file}}`, `{{output_file}}`, `{{target_url}}`, etc.)
-- Executing via `bash -c` to handle pipes, redirects, and command chaining
-- Capturing stdout and reading output from the declared output path
-- Parsing tool output into a normalized `RunResult` via a registered parser (`tulip-results`, `k6-jsonl`, etc.)
+- Loads the profile template from `profiles/<tool>/`. JSON/JSONC templates have overrides applied via JSON path (`profile.overrides[].path`) with type coercion based on the existing value; script templates (`.js`, `.jmx`, `.scala`) are copied as-is and overrides are passed via env vars / CLI flags (`-e`, `-J`, `-D`) through command substitution.
+- Builds a temp config file, resolves the output path (either `{{config.<jsonPath>}}` embedded in the config, `{{output_file}}`, or `stdout`), and substitutes `{{config_file}}`, `{{output_file}}`, and all override keys into `toolDef.run.command`.
+- Executes via `bash -c`, captures stdout via `CompletableFuture`, and enforces `TestPlan.timeoutSec` with `process.waitFor(timeout, SECONDS)`. On timeout, kills the entire subprocess tree (`process.descendants().forEach { destroyForcibly() }`), waits 2 s, and returns a `failed` result with `timeout after Xs`.
+- Reads output from the declared file or stdout, then dispatches to the parser for `profileDef.output.schema` (`tulip-results`, `k6-jsonl`, `jmeter-csv`). Parse failures return `failed` with `Parse error`.
+- Sanitizes every override: rejects shell metacharacters (`;|&` + backtick + `$(){}<>` + newlines), validates `target_url` against `^[a-zA-Z0-9._\-:/]+$`, and validates numeric overrides as integers.
+- Validates `timeoutSec >= durationSec + warmupSec + 10` when the profile exposes `duration_sec`; otherwise the run would be killed mid-test.
 
-The rest of the system should not care which tool is being run — it consumes normalized `RunResult` objects from SQLite.
+Parsers normalize tool-specific output into `RunResult` / `Summary` / `Latency`:
 
----
+- `Latency` carries `minMs`, `p50Ms`, `p90Ms`, `p95Ms`, `p99Ms`, `maxMs`, plus `meanMs`/`stdevMs` (population stdev via `Stats`).
+- `TulipParser`: JSON with `results[]` array, latency in nanoseconds → ms; `meanMs`/`stdevMs` from `avg_rt`/`sd_rt`.
+- `JMeterParser`: JTL CSV with nearest-rank percentiles.
+- `K6Parser`: NDJSON `Metric` lines, computes percentiles from `http_req_duration` samples.
 
-## Output and File Handling
+## Store and Schema
 
-The raw output path should be handled as a first-class concern:
+```sql
+CREATE TABLE adapters (
+    name TEXT PRIMARY KEY,
+    supported_types TEXT NOT NULL,
+    adapter_version TEXT NOT NULL,
+    tool_versions TEXT NOT NULL
+);
+CREATE TABLE test_scenarios (
+    id TEXT PRIMARY KEY,
+    tool TEXT NOT NULL REFERENCES adapters(name),
+    name TEXT NOT NULL,
+    test_plan JSON NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(tool, name)
+);
+CREATE TABLE runs (
+    id TEXT PRIMARY KEY,
+    scenario_id TEXT NOT NULL REFERENCES test_scenarios(id),
+    tool TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    completed_at TEXT,
+    error TEXT,
+    summary JSON,
+    raw_output_path TEXT,
+    metadata JSON DEFAULT '{}'
+);
+CREATE TABLE baselines (
+    scenario_id TEXT PRIMARY KEY REFERENCES test_scenarios(id),
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    tagged_at TEXT NOT NULL
+);
+CREATE TABLE schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
 
-- Write to a temporary file first.
-- Rename to the final path only after the process completes successfully or when a failure is final.
-- Store the final path in the run record.
-- Preserve both stdout and stderr in the file for debugging.
-
-This avoids partially written outputs and makes the integration test predictable.
-
----
+All public `Store` methods are `synchronized(lock)` (single shared JDBC `Connection`). `insertScenario` uses `ON CONFLICT(tool,name) DO UPDATE SET test_plan = excluded.test_plan` and re-reads the row. `listRecentRuns` filters `status IN ('completed','failed','cancelled')` and `ORDER BY created_at DESC LIMIT ?` with optional `tool`/`test_name` filters via `JOIN test_scenarios`.
 
 ## Authentication and Security
 
-The Phase 1 auth model is intentionally simple:
-
-- A token is required at startup (`--token=<token>` or `BOEHM_TOKEN`); the
-  server refuses to start without one.
-- stdio transport security is delegated to the spawning process — whoever can
-  talk to the server's stdin is trusted (the spawner supplied the token).
-- No per-request validation, role model, or token rotation in Phase 1.
-
-The important design choice is that the server never runs without an explicit
-token, so accidental unsandboxed starts are visible.
-
----
+- Token required at startup: `--token=<token>` or `BOEHM_TOKEN`. Server refuses to start without it (`exit 1`). Transport trust is delegated to the spawner (stdio).
+- No per-request auth in Phase 1. Raw outputs are written to `~/.boehm/outputs/<tool>/` with default umask; DB at `BOEHM_DB_PATH`.
 
 ## Error Handling
 
-Phase 1 should handle errors explicitly and consistently:
+| Scenario | Behavior |
+|----------|----------|
+| Missing/blank token at startup | Stderr + exit 1 |
+| Unknown tool | `SubmitResult.UnknownAdapter` → MCP `-32000` with `available_adapters` |
+| Unknown profile | `SubmitResult.UnknownProfile` → `-32001` |
+| Invalid plan (blank URL, non-positive durations, timeout too short) | `SubmitResult.Invalid` → `-32001` with `validation_errors` |
+| Tool binary missing / non-zero exit / parse error | Run `failed`, `error` + `metadata.exitCode/stdout` preserved |
+| Timeout | Subprocess tree killed, run `failed` with `timeout after Xs` |
+| Adapter throws | Run `failed` with `Exception: message`; queue continues |
+| Cancel queued | `cancelled` immediately |
+| Cancel running | `destroyForcibly()` on active process; final status `cancelled` |
+| Internal failure | MCP `-32603` or handler `isError = true` with structured `code/message` |
 
-- Invalid input: return a validation error and do not create a run.
-- Tool binary missing: mark the run as `failed` with a clear error.
-- Timeout: kill the subprocess and record the failure with partial progress if available.
-- Non-zero tool exit: record stderr and mark the run as `failed`.
-- Internal failure: return MCP error `-32603` and log server-side details.
+## Module Layout
 
-The server should avoid silently swallowing failures and should preserve enough context to debug the run later.
-
----
-
-## Recommended Module Layout
-
-```text
-Boehm/
-├── build.gradle.kts
-├── catalog.yaml                     # Tool index: profiles, overrides, parsers
-├── profiles/
-│   ├── tulip/http-get.jsonc         # Tulip config template (JSONC)
-│   ├── tulip/demo.jsonc
-│   ├── k6/http-get.js               # k6 script template
-│   ├── jmeter/http-get.jmx          # JMeter plan template
-│   └── gatling/http-get.scala       # Gatling simulation template
-├── src/
-│   ├── main/kotlin/io/boehm/
-│   │   ├── Main.kt                  # Entry point: stdio + catalog loader + 9 tool registrations
-│   │   ├── catalog/
-│   │   │   ├── CatalogModels.kt     # Catalog YAML data classes
-│   │   │   ├── CatalogLoader.kt     # Parse catalog.yaml
-│   │   │   ├── AdapterBuilder.kt    # Build adapters only for parser-backed schemas
-│   │   │   └── CatalogAdapter.kt    # Generic PerfToolAdapter
-│   │   ├── core/
-│   │   │   ├── BoehmToolHandlers.kt  # MCP tool handlers (suspend funs)
-│   │   │   ├── Comparator.kt         # Direction-aware baseline comparison
-│   │   │   ├── Orchestrator.kt       # Test plan routing, run lifecycle, cancel routing
-│   │   │   ├── Scheduler.kt          # Serial run queue + subprocess cancellation
-│   │   │   └── Store.kt              # SQLite operations (runs, scenarios, baselines)
-│   │   ├── model/
-│   │   │   ├── TestPlan.kt          # Input: how to run a test
-│   │   │   ├── RunResult.kt         # Output: normalized result + summary
-│   │   │   └── ProgressEvent.kt     # Progress, events, enums
-│   │   └── adapters/
-│   │       ├── PerfToolAdapter.kt   # Interface all adapters implement
-│   │       ├── tulip/
-│   │       │   └── TulipParser.kt    # Parse Tulip JSON → RunResult
-│   │       ├── jmeter/
-│   │       │   └── JMeterParser.kt   # Parse JMeter JTL CSV → RunResult
-│   │       └── k6/
-│   │           └── K6Parser.kt       # Parse k6 NDJSON → RunResult
-│   └── test/kotlin/io/boehm/
-│       ├── adapter/
-│       │   ├── TulipAdapterTest.kt  # Tests CatalogAdapter via tulip profile
-│       │   ├── TulipParserTest.kt
-│       │   ├── JMeterParserTest.kt
-│       │   └── K6ParserTest.kt
-│       ├── catalog/
-│       │   ├── AdapterBuilderTest.kt
-│       │   └── CatalogLoaderTest.kt
-│       ├── core/
-│       │   ├── BoehmServerTest.kt
-│       │   ├── ComparatorTest.kt
-│       │   ├── OrchestratorTest.kt
-│       │   ├── SchedulerTest.kt
-│       │   └── StoreTest.kt
-│       ├── model/
-│       │   └── RunResultTest.kt
-│       ├── fixtures/
-│       │   ├── mock-tulip.sh
-│       │   ├── run-real-tulip.sh
-│       │   ├── tulip-sample-output.json
-│       │   └── jmeter-sample-output.csv
-│       └── integration/
-│           ├── TulipIntegrationTest.kt
-│           └── JMeterIntegrationTest.kt
 ```
-
----
-
-## What This Design Improves Over the First Draft
-
-- It avoids making the MCP server itself the place where long-running execution and polling logic become too coupled.
-- It makes progress observable even if the process or server restarts.
-- It keeps the adapter interface stable while still allowing Tulip-specific parsing to remain isolated.
-- It aligns the architecture with the Phase 1 acceptance criteria rather than overreaching into later phases.
-
-## Risks to Keep in Mind
-
-- Tulip may not provide a perfectly stable progress stream. For Phase 1, progress should be treated as best-effort and degraded gracefully.
-- The server must never block the stdio loop for a long-running test. That is a hard requirement for a usable MCP implementation.
-- The design should stay small. The temptation to add multi-user auth, generic plugin discovery, or parallel runners should be resisted until Phase 2.
+Boehm/
+├── build.gradle.kts                  # Kotlin 2.4.10, JVM 25, Gson, SQLite, SnakeYAML, MCP SDK 0.15.0
+├── catalog.yaml                      # Tool index: profiles, overrides, parsers
+├── profiles/
+│   ├── tulip/http-get.jsonc, demo.jsonc
+│   ├── k6/http-get.js
+│   ├── jmeter/http-get.jmx
+│   └── gatling/http-get.scala
+├── src/main/kotlin/io/boehm/
+│   ├── Main.kt                       # stdio entry point, catalog loader, parser registry, 9 tool registrations
+│   ├── catalog/
+│   │   ├── CatalogModels.kt          # Catalog, ToolDef, ProfileDef, OutputDef, OverrideDef
+│   │   ├── CatalogLoader.kt          # SnakeYAML parse → typed models
+│   │   ├── AdapterBuilder.kt         # buildAdapters(): filter by parser schema
+│   │   └── CatalogAdapter.kt         # PerfToolAdapter: template + overrides + bash -c + timeout + parse
+│   ├── core/
+│   │   ├── BoehmToolHandlers.kt      # 9 MCP tool handlers + progress estimation
+│   │   ├── Orchestrator.kt           # SubmitResult / CancelResult, scenario persistence, scheduler lifecycle
+│   │   ├── Scheduler.kt              # serial queue, failInterruptedRuns, requestCancel
+│   │   ├── Comparator.kt             # direction-aware 10% threshold comparison
+│   │   └── Store.kt                  # SQLite (adapters, scenarios, runs, baselines), synchronized
+│   ├── model/
+│   │   ├── TestPlan.kt               # type, profile, targetUrl, rate/duration/warmup/timeout, parameters
+│   │   ├── RunResult.kt              # RunResult, Summary, Latency (mean/stdev)
+│   │   ├── ProgressEvent.kt          # progress / server status types
+│   │   └── Stats.kt                  # mean + population stdev
+│   └── adapters/
+│       ├── PerfToolAdapter.kt        # interface
+│       ├── tulip/TulipParser.kt
+│       ├── jmeter/JMeterParser.kt
+│       └── k6/K6Parser.kt
+└── src/test/kotlin/io/boehm/
+    ├── adapter/                      # TulipAdapterTest, TulipParserTest, JMeterParserTest, K6ParserTest
+    ├── catalog/                      # AdapterBuilderTest, CatalogLoaderTest, CatalogAdapterValidationTest
+    ├── core/                         # BoehmServerTest, ComparatorTest, OrchestratorTest, SchedulerTest, StoreTest
+    ├── model/                        # RunResultTest, ProgressEventTest
+    └── integration/                  # TulipIntegrationTest, JMeterIntegrationTest, K6IntegrationTest
+```
