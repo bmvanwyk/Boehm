@@ -22,16 +22,23 @@ class JMeterIntegrationTest {
                 "-l {{output_file}} " +
                 "-j {{output_file}}.log"
         }
-        // Docker fallback (podman needs fully-qualified) — skip if image not cached and no network
+        // Docker fallback (podman needs fully-qualified) — hub.docker.com/r/alpine/jmeter or justb4/jmeter
         val docker = System.getenv("PATH")?.split(File.pathSeparator)?.firstOrNull { File("$it/docker").exists() }
-        if (docker != null && isDockerImagePresent("docker.io/justb4/jmeter:5.6.3")) {
-            return "docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} -v {{output_file}}.log:{{output_file}}.log docker.io/justb4/jmeter:5.6.3 " +
+        if (docker != null) {
+            val image = when {
+                isDockerImagePresent("docker.io/alpine/jmeter:latest") -> "docker.io/alpine/jmeter:latest"
+                isDockerImagePresent("docker.io/justb4/jmeter:5.6.3") -> "docker.io/justb4/jmeter:5.6.3"
+                else -> null
+            }
+            if (image != null) {
+                return "docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} -v {{output_file}}.log:{{output_file}}.log $image " +
                 "-Jtarget_url={{target_url}} " +
                 "-Jthreads={{threads}} " +
                 "-Jduration_sec={{duration_sec}} " +
                 "-n -t {{config_file}} " +
                 "-l {{output_file}} " +
                 "-j {{output_file}}.log"
+            }
         }
         return null
     }
