@@ -11,7 +11,7 @@ class HttpGetSimulation extends Simulation {
   val durationSec = System.getProperty("duration_sec", "30").toInt
 
   private val uri = new java.net.URI(targetUrl)
-  private val base = s"${uri.getScheme}://${uri.getHost}${Option(uri.getPort).filter(_ != -1).map(":" + _).getOrElse("")}"
+  private val base = s"${uri.getScheme}://${uri.getHost}${if (uri.getPort != -1) s":${uri.getPort}" else ""}"
   private val path = Option(uri.getPath).filter(_.nonEmpty).getOrElse("/") +
     Option(uri.getQuery).map("?" + _).getOrElse("") +
     Option(uri.getFragment).map("#" + _).getOrElse("")

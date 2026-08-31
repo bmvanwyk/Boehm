@@ -88,7 +88,9 @@ class BoehmServerTest {
         val json = gson.fromJson(contentText(result), Map::class.java)
         assertNotNull(json["runId"])
         assertEquals("my-test", json["testName"])
-        assertEquals("queued", json["status"])
+        // Scheduler may have already started the run (500ms poll) — accept either
+        assertTrue(json["status"] == "queued" || json["status"] == "running",
+            "expected queued or running, got ${json["status"]}")
     }
 
     @Test

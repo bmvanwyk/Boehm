@@ -240,8 +240,8 @@ class CatalogAdapter(
                         require(uri.scheme == "http" || uri.scheme == "https") { "scheme must be http or https" }
                         requireNotNull(uri.host) { "host required" }
                     } else {
-                        // Bare host for JMeter — validate as hostname
-                        require(value.matches(Regex("^[a-zA-Z0-9._\\-]+$"))) { "host must be alphanumeric, dot, hyphen, underscore" }
+                        // Bare host for JMeter — allow host:port
+                        require(value.matches(Regex("^[a-zA-Z0-9._\\-]+(:\\d+)?$"))) { "host must be alphanumeric, dot, hyphen, underscore, optional :port" }
                     }
                 } catch (e: Exception) {
                     throw IllegalArgumentException("Invalid override 'target_url': ${e.message} in '$value'")
