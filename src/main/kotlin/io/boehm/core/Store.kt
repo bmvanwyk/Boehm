@@ -16,7 +16,7 @@ class Store(private val dbPath: String) {
     private var _conn: Connection? = null
     private val lock = Any()
     private val conn: Connection
-        get() {
+        get() = synchronized(lock) {
             if (_conn == null) {
                 Class.forName("org.sqlite.JDBC")
                 val c = DriverManager.getConnection("jdbc:sqlite:$dbPath")
@@ -24,7 +24,7 @@ class Store(private val dbPath: String) {
                 initSchema(c)
                 _conn = c
             }
-            return _conn!!
+            _conn!!
         }
 
     private fun initSchema(c: Connection) {
@@ -80,7 +80,10 @@ class Store(private val dbPath: String) {
             val cur = if (rs.next()) rs.getInt("v") else 0
             rs.close()
             if (cur < 1) {
-                stmt.execute("INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (1, '${Instant.now()}')")
+                c.prepareStatement("INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (1, ?)").use { ps ->
+                    ps.setString(1, Instant.now().toString())
+                    ps.execute()
+                }
             }
         }
     }
