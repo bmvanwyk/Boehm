@@ -102,4 +102,13 @@ class GatlingParserTest {
         assertEquals(60.0, result.metadata["p75Ms"] as Double, 0.001)
         assertTrue(result.metadata.containsKey("p90IsP75Approximation"))
     }
+
+    @Test
+    fun `duration is rounded not truncated`() {
+        // total 1500, throughput 50.5 => 29.7 should round to 30, not truncate to 29
+        val json = File("src/test/fixtures/gatling-sample-output.json").readText()
+            .replace("\"total\": \"50.0\"", "\"total\": \"50.5\"")
+        val result = GatlingParser.parse(json)
+        assertEquals(30, result.summary!!.durationSec)
+    }
 }

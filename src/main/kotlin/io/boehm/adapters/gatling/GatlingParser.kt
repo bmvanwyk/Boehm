@@ -62,7 +62,7 @@ object GatlingParser {
             ?.let { parseDouble(it.get("total")) } ?: 0.0
 
         val durationSec = if (throughput > 0) {
-            (totalReq.toDouble() / throughput).toInt().coerceAtLeast(1)
+            kotlin.math.round(totalReq.toDouble() / throughput).toInt().coerceAtLeast(1)
         } else {
             1
         }
