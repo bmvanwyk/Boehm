@@ -24,9 +24,10 @@ class K6IntegrationTest {
             return "$goBin run -e TARGET_URL={{target_url}} -e RATE_PER_SEC={{rate_per_sec}} -e DURATION_SEC={{duration_sec}} --out json={{output_file}} {{config_file}}"
         }
         // Docker fallback (podman needs fully-qualified) — skip if image not cached
+        // Use parent-dir touch to avoid docker creating a directory at output file path
         val docker = System.getenv("PATH")?.split(File.pathSeparator)?.firstOrNull { File("$it/docker").exists() }
         if (docker != null && isDockerImagePresent("docker.io/grafana/k6:latest")) {
-            return "docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} docker.io/grafana/k6:latest run -e TARGET_URL={{target_url}} -e RATE_PER_SEC={{rate_per_sec}} -e DURATION_SEC={{duration_sec}} --out json={{output_file}} {{config_file}}"
+            return "mkdir -p $(dirname {{output_file}}) && touch {{output_file}} && docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} docker.io/grafana/k6:latest run -e TARGET_URL={{target_url}} -e RATE_PER_SEC={{rate_per_sec}} -e DURATION_SEC={{duration_sec}} --out json={{output_file}} {{config_file}}"
         }
         return null
     }

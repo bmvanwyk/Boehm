@@ -31,7 +31,7 @@ class JMeterIntegrationTest {
                 else -> null
             }
             if (image != null) {
-                return "docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} -v {{output_file}}.log:{{output_file}}.log $image " +
+                return "mkdir -p $(dirname {{output_file}}) && touch {{output_file}} && touch {{output_file}}.log && docker run --rm -v {{config_file}}:{{config_file}} -v {{output_file}}:{{output_file}} -v {{output_file}}.log:{{output_file}}.log $image " +
                 "-Jtarget_url={{target_url}} " +
                 "-Jthreads={{threads}} " +
                 "-Jduration_sec={{duration_sec}} " +
