@@ -195,7 +195,7 @@ k6:
 { "tool": "k6", "test_name": "my-post", "test_plan": { "profile": "http-post", "target_url": "https://myhost/api", "rate_per_sec": 50 } }
 ```
 
-Overrides not listed are ignored (`CatalogAdapter.kt:184`); `target_url` is validated against `^[a-zA-Z0-9._\-:/]+$` and numeric overrides must be integers (`CatalogAdapter.kt:29,214`); `timeout_sec` must satisfy `>= duration_sec + warmup_sec + 10` (`CatalogAdapter.kt:62`).
+Overrides not listed are warned (`CatalogAdapter.kt:212` — unknown overrides produce `validation_errors`); `target_url` is validated as `http`/`https` URI with query strings allowed and shell-metachar screening (`CatalogAdapter.kt:215,222`); numeric overrides must be integers; `timeout_sec` must satisfy `>= duration_sec + warmup_sec + 10` (`CatalogAdapter.kt:62`). Docker fallback is test-only — production `catalog.yaml` remains bare-metal (see `src/test/kotlin/io/boehm/integration/*:14`).
 
 ### Adding a new tool
 

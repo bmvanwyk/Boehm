@@ -7,6 +7,8 @@
 # The `output` field tells Boehm where to find the tool's results after execution.
 #   - For JSON-based tools (Tulip): output path is embedded in the config JSON
 #   - For script-based tools (k6, JMeter, Gatling): output is {{output_file}}
+# Docker fallback is test-only: integration tests (JMeterIntegrationTest.kt:14 etc.)
+# try bare-metal then docker.io/... via podman; production catalog remains bare-metal.
 #
 # Consistency of measurement: the same template file is used every run,
 # so test structure never drifts. Only the declared override params vary.

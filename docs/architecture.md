@@ -8,10 +8,10 @@ Boehm is a Kotlin/JVM MCP server that runs performance tests via external CLI to
 graph TB
     Agent["AI Agent<br/>(opencode, Claude Code, etc.)"]
     Boehm["Boehm MCP Server<br/>Kotlin/JVM 25"]
-    Tulip["Tulip CLI"]
-    K6["k6<br/>(bare metal or docker)"]
-    JMeter["JMeter<br/>(bare metal or docker)"]
-    Gatling["Gatling<br/>(bare metal or docker)"]
+    Tulip["Tulip CLI<br/>bare metal only"]
+    K6["k6<br/>bare metal (test: docker)"]
+    JMeter["JMeter<br/>bare metal (test: docker)"]
+    Gatling["Gatling<br/>bare metal (test: docker)"]
     Target["Target System<br/>(e.g. httpbin.org)"]
     SQLite[(SQLite<br/>~/.boehm/boehm.db)]
     OutputDir[(Raw Outputs<br/>~/.boehm/outputs/&lt;tool&gt;/)]
@@ -34,7 +34,7 @@ graph TB
 1. **MCP server is the entrypoint, not the execution engine.** `run_test` validates, persists a `queued` run, and returns immediately. A background scheduler serially executes runs so the stdio loop never blocks.
 2. **SQLite is the source of truth.** Runs, queue state, baselines, and errors are persisted. In-memory state is a cache. The DB path is configurable via `BOEHM_DB_PATH` (`~/.boehm/boehm.db` default, `BOEHM_CATALOG_PATH` for the catalog).
 3. **Adapter boundary is narrow.** `PerfToolAdapter` exposes `validate` and `run` (with an optional `onProcessStart` callback for cancellation). All tool-specific work (template rendering, command substitution, parsing) lives behind that interface.
-4. **Catalog-driven.** Every tool and profile is declared in `catalog.yaml`. No hardcoded adapters. `AdapterBuilder` registers only profiles whose `output.schema` has a parser (`tulip-results`, `jmeter-csv`, `k6-jsonl`, `gatling-stats`).
+4. **Catalog-driven.** Every tool and profile is declared in `catalog.yaml`. No hardcoded adapters. `AdapterBuilder` registers only profiles whose `output.schema` has a parser (`tulip-results`, `jmeter-csv`, `k6-jsonl`, `gatling-stats`). Production `catalog.yaml` is bare-metal; Docker fallback is test-only via `isDockerImagePresent()` in `JMeterIntegrationTest.kt:14` etc.
 5. **Local-first and serial.** One run at a time prevents measurement noise. No cloud dependencies. All `Store` access is serialized behind a single lock (shared SQLite `Connection` is not thread-safe).
 6. **Measurement integrity.** Resubmitting a scenario name upserts its stored plan; timestamps are ISO-8601 (`Instant.now().toString()`) everywhere so lexicographic ordering is correct; timeout is validated before queuing.
 
@@ -260,8 +260,9 @@ Only profiles whose `output.schema` has a parser get an adapter (`AdapterBuilder
 - Builds a temp config file, resolves the output path (either `{{config.<jsonPath>}}` embedded in the config, `{{output_file}}`, or `stdout`), and substitutes `{{config_file}}`, `{{output_file}}`, and all override keys into `toolDef.run.command`.
 - Executes via `bash -c`, captures stdout via `CompletableFuture`, and enforces `TestPlan.timeoutSec` with `process.waitFor(timeout, SECONDS)`. On timeout, kills the entire subprocess tree (`process.descendants().forEach { destroyForcibly() }`), waits 2 s, and returns a `failed` result with `timeout after Xs`.
 - Reads output from the declared file or stdout, then dispatches to the parser for `profileDef.output.schema` (`tulip-results`, `k6-jsonl`, `jmeter-csv`, `gatling-stats`). Parse failures return `failed` with `Parse error`.
-- Sanitizes every override: rejects shell metacharacters (`;|&` + backtick + `$(){}<>` + newlines), validates `target_url` against `^[a-zA-Z0-9._\-:/]+$`, and validates numeric overrides as integers.
+- Sanitizes every override: rejects shell metacharacters (for `target_url` allows `&` in query strings via `URL_SHELL_REGEX`), rejects whitespace, validates `target_url` as `http`/`https` URI with query strings allowed, and validates numeric overrides as integers.
 - Validates `timeoutSec >= durationSec + warmupSec + 10` when the profile exposes `duration_sec`; otherwise the run would be killed mid-test.
+- Unknown `parameters` keys not in `profile.overrides` produce `ValidationError` warnings (not silently ignored).
 
 Parsers normalize tool-specific output into `RunResult` / `Summary` / `Latency`:
 
@@ -269,7 +270,7 @@ Parsers normalize tool-specific output into `RunResult` / `Summary` / `Latency`:
 - `TulipParser`: JSON with `results[]` array, latency in nanoseconds → ms; `meanMs`/`stdevMs` from `avg_rt`/`sd_rt`.
 - `JMeterParser`: JTL CSV with nearest-rank percentiles.
 - `K6Parser`: NDJSON `Metric` lines, computes percentiles from `http_req_duration` samples.
-- `GatlingParser`: `js/global_stats.json` with string-encoded numbers; p50/p90/p95/p99 from `percentiles1`/`percentiles2`/`percentiles3`/`percentiles4`, mean/stdev from `meanResponseTime`/`standardDeviation`, throughput from `meanNumberOfRequestsPerSecond`.
+- `GatlingParser`: `js/global_stats.json` with string-encoded numbers; `p50`=`percentiles1` (50th), `p90`≈`p75` (`percentiles2` 75th, closest available, also stored as `p75Ms` in `metadata`), `p95`=`percentiles3` (95th), `p99`=`percentiles4` (99th), mean/stdev from `meanResponseTime`/`standardDeviation`, throughput from `meanNumberOfRequestsPerSecond` (rounded).
 
 ## Store and Schema
 
