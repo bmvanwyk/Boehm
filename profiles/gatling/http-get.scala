@@ -10,15 +10,21 @@ class HttpGetSimulation extends Simulation {
   val ratePerSec = System.getProperty("rate_per_sec", "50").toInt
   val durationSec = System.getProperty("duration_sec", "30").toInt
 
+  private val uri = new java.net.URI(targetUrl)
+  private val base = s"${uri.getScheme}://${uri.getHost}${Option(uri.getPort).filter(_ != -1).map(":" + _).getOrElse("")}"
+  private val path = Option(uri.getPath).filter(_.nonEmpty).getOrElse("/") +
+    Option(uri.getQuery).map("?" + _).getOrElse("") +
+    Option(uri.getFragment).map("#" + _).getOrElse("")
+
   val httpProtocol = http
-    .baseUrl(targetUrl)
+    .baseUrl(base)
     .acceptHeader("text/html,application/json")
     .userAgentHeader("Boehm-Gatling")
 
   val scn = scenario("HTTP GET")
     .exec(
       http("get-request")
-        .get("/")
+        .get(path)
         .check(status.is(200))
     )
 
