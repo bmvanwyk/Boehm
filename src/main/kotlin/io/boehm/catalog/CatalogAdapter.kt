@@ -23,11 +23,6 @@ class CatalogAdapter(
 ) : PerfToolAdapter {
 
     companion object {
-        // Allowed characters in a target_url override: alphanumerics, and a small
-        // set of safe URL punctuation. Everything else (shell metacharacters,
-        // whitespace, control chars) is rejected before it reaches the shell.
-        private val TARGET_URL_REGEX = Regex("^[a-zA-Z0-9._\\-:/]+$")
-
         // Process timeout must cover the whole test plus teardown slack.
         private const val TIMEOUT_SLACK_SEC = 10
     }
@@ -213,23 +208,32 @@ class CatalogAdapter(
     }
 
     private val SHELL_METACHAR_REGEX = Regex("[;|&`\$(){}<>\\n\\r]")
+    private val URL_SHELL_REGEX = Regex("[;|`\$(){}<>\\n\\r]") // for URLs, allow & and ?=&%# etc.
 
     /**
      * Reject override values that contain shell metacharacters or otherwise look
      * like command injection. Numeric overrides are parsed as int; target_url is
-     * constrained to a safe URL/character set.
+     * validated as http/https URI (query strings allowed, whitespace still rejected).
      */
     private fun sanitizeOverride(name: String, value: String) {
         if (value.isEmpty()) return
-        if (SHELL_METACHAR_REGEX.containsMatchIn(value)) {
+        val shellRegex = if (name == "target_url") URL_SHELL_REGEX else SHELL_METACHAR_REGEX
+        if (shellRegex.containsMatchIn(value)) {
             throw IllegalArgumentException(
                 "Invalid override '$name': value contains shell metacharacters: '$value'")
         }
+        if (value.contains(Regex("\\s"))) {
+            throw IllegalArgumentException(
+                "Invalid override '$name': value contains whitespace: '$value'")
+        }
         when (name) {
             "target_url" -> {
-                if (!TARGET_URL_REGEX.matches(value)) {
-                    throw IllegalArgumentException(
-                        "Invalid override 'target_url': illegal characters in '$value'")
+                try {
+                    val uri = java.net.URI(value)
+                    require(uri.scheme == "http" || uri.scheme == "https") { "scheme must be http or https" }
+                    requireNotNull(uri.host) { "host required" }
+                } catch (e: Exception) {
+                    throw IllegalArgumentException("Invalid override 'target_url': ${e.message} in '$value'")
                 }
             }
             "rate_per_sec", "duration_sec", "warmup_sec", "timeout_sec", "threads", "connections" -> {
