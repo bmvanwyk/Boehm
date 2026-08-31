@@ -71,7 +71,7 @@ class BoehmToolHandlers(
                 ))
             }
             is Orchestrator.SubmitResult.UnknownAdapter ->
-                errorResult(-32000, "Adapter not found: ${result.tool}",
+                errorResult(-32000, "Adapter not found: ${result.tool} (removed: vegeta, wrk — see CHANGELOG.md)",
                     mapOf("available_adapters" to store.listAdapters().map { it.name }))
             is Orchestrator.SubmitResult.UnknownProfile ->
                 errorResult(-32001, "Unknown profile '${result.profile}' for tool '${result.tool}'")
