@@ -213,8 +213,8 @@ class CatalogAdapter(
         return result
     }
 
-    private val SHELL_METACHAR_REGEX = Regex("[;|&`\$(){}<>\\n\\r]")
-    private val URL_SHELL_REGEX = Regex("[;|`\$(){}<>\\n\\r]") // for URLs, allow & and ?=&%# etc.
+    private val SHELL_METACHAR_REGEX = Regex("[;|&`\$(){}<>\\n\\r']")
+    private val URL_SHELL_REGEX = Regex("[;|`\$(){}<>\\n\\r']") // for URLs, allow & and ?=&%# etc., but block '
 
     /**
      * Reject override values that contain shell metacharacters or otherwise look
@@ -356,7 +356,13 @@ class CatalogAdapter(
     private fun substituteCommand(command: String, subs: Map<String, String>): String {
         var result = command
         for ((key, value) in subs) {
-            result = result.replace("{{${key}}}", value)
+            // Quote for bash -c to preserve & in query strings, but avoid double-quoting
+            // if placeholder is already inside single quotes in the template (e.g. Tulip's --args='--config {{config_file}}')
+            val quoted = "'${value.replace("'", "'\\''")}'"
+            // First handle already-quoted placeholders
+            result = result.replace("'{{${key}}}'", "'$value'")
+            result = result.replace("\"{{${key}}}\"", "\"$value\"")
+            result = result.replace("{{${key}}}", quoted)
         }
         return result
     }
