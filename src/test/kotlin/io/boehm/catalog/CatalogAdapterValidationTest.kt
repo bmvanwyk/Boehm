@@ -93,4 +93,19 @@ class CatalogAdapterValidationTest {
             assertTrue(threw, "expected IllegalArgumentException for malicious url: $url")
         }
     }
+
+    @Test
+    fun `unknown override is warned`() {
+        val adapter = adapter()
+        val plan = TestPlan(type = "http", profile = "http-get", targetUrl = "https://example.com",
+            durationSec = 30, warmupSec = 5, timeoutSec = 60,
+            parameters = mapOf("duratin_sec" to "30", "duration_sec" to "30"))
+        val errors = adapter.validate(plan)
+        // duratin_sec is typo, should be warned
+        assertTrue(errors.any { it.field == "duratin_sec" && it.message.contains("unknown") },
+            "expected unknown override warning for duratin_sec, got: $errors")
+        // known override should not be warned
+        assertTrue(errors.none { it.field == "duration_sec" && it.message.contains("unknown") },
+            "duration_sec is known, should not be warned, got: $errors")
+    }
 }

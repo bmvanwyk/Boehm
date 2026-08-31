@@ -66,6 +66,12 @@ class CatalogAdapter(
                 )
             }
         }
+        // Warn on unknown overrides (typos) — not silently ignored
+        for ((name, _) in testPlan.parameters) {
+            if (name !in profileDef.overrides) {
+                errors.add(ValidationError(name, "unknown override for profile '${profileDef.name}' (ignored)"))
+            }
+        }
         return errors
     }
 
