@@ -225,4 +225,11 @@ class StoreTest {
         assertTrue(run.error!!.contains("interrupted"))
         assertNotNull(run.completedAt)
     }
+
+    @Test
+    fun `schema_version is updated on startup`() {
+        assertEquals(1, store.getSchemaVersion())
+        store.setSchemaVersion(2)
+        assertEquals(2, store.getSchemaVersion())
+    }
 }

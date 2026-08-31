@@ -75,6 +75,33 @@ class Store(private val dbPath: String) {
                     tagged_at TEXT NOT NULL
                 )
             """)
+            // Ensure schema_version is at least 1
+            val rs = stmt.executeQuery("SELECT COALESCE(MAX(version),0) as v FROM schema_version")
+            val cur = if (rs.next()) rs.getInt("v") else 0
+            rs.close()
+            if (cur < 1) {
+                stmt.execute("INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (1, '${Instant.now()}')")
+            }
+        }
+    }
+
+    fun getSchemaVersion(): Int {
+        synchronized(lock) {
+            conn.createStatement().use { stmt ->
+                stmt.executeQuery("SELECT COALESCE(MAX(version),0) as v FROM schema_version").use { rs ->
+                    return if (rs.next()) rs.getInt("v") else 0
+                }
+            }
+        }
+    }
+
+    fun setSchemaVersion(version: Int) {
+        synchronized(lock) {
+            conn.prepareStatement("INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (?, ?)").use { ps ->
+                ps.setInt(1, version)
+                ps.setString(2, Instant.now().toString())
+                ps.execute()
+            }
         }
     }
 
