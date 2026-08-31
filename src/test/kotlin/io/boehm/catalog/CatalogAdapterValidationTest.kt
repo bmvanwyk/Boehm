@@ -95,17 +95,22 @@ class CatalogAdapterValidationTest {
     }
 
     @Test
-    fun `unknown override is warned`() {
+    fun `unknown override is warned not hard error`() {
         val adapter = adapter()
         val plan = TestPlan(type = "http", profile = "http-get", targetUrl = "https://example.com",
             durationSec = 30, warmupSec = 5, timeoutSec = 60,
             parameters = mapOf("duratin_sec" to "30", "duration_sec" to "30"))
+        // validate should not fail for unknown overrides (warn, not error)
         val errors = adapter.validate(plan)
-        // duratin_sec is typo, should be warned
-        assertTrue(errors.any { it.field == "duratin_sec" && it.message.contains("unknown") },
-            "expected unknown override warning for duratin_sec, got: $errors")
+        assertTrue(errors.none { it.field == "duratin_sec" },
+            "unknown override should not be hard error in validate, got: $errors")
+        // run should produce a result with warnings in metadata
+        val result = adapter.run(plan)
+        @Suppress("UNCHECKED_CAST")
+        val warnings = result.metadata["warnings"] as? List<String> ?: emptyList()
+        assertTrue(warnings.any { it.contains("duratin_sec") }, "expected warning for duratin_sec in run metadata, got: ${result.metadata}")
         // known override should not be warned
-        assertTrue(errors.none { it.field == "duration_sec" && it.message.contains("unknown") },
-            "duration_sec is known, should not be warned, got: $errors")
+        assertTrue(warnings.none { it.contains("duration_sec") && it.contains("unknown") },
+            "duration_sec is known, should not be warned, got: $warnings")
     }
 }

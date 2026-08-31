@@ -66,12 +66,8 @@ class CatalogAdapter(
                 )
             }
         }
-        // Warn on unknown overrides (typos) — not silently ignored
-        for ((name, _) in testPlan.parameters) {
-            if (name !in profileDef.overrides) {
-                errors.add(ValidationError(name, "unknown override for profile '${profileDef.name}' (ignored)"))
-            }
-        }
+        // Unknown overrides are not hard errors — they are warned in run() metadata
+        // to avoid breaking callers with typos while still surfacing the issue.
         return errors
     }
 
@@ -79,6 +75,7 @@ class CatalogAdapter(
 
     override fun run(testPlan: TestPlan, onProcessStart: (java.lang.Process) -> Unit): RunResult {
         val overrides = resolveOverrides(testPlan)
+        val unknownOverrides = testPlan.parameters.keys.filter { it !in profileDef.overrides }
 
         val outputDir = File(System.getProperty("user.home"), ".boehm/outputs/${toolDef.name}")
         outputDir.mkdirs()
@@ -161,13 +158,15 @@ class CatalogAdapter(
         val rawOutput = readOutput(profileDef.output.path, resolvedOutputPath, stdout)
 
         // Parse
+        val unknownWarning = if (unknownOverrides.isNotEmpty()) mapOf("warnings" to unknownOverrides.map { "unknown override $it ignored" }) else emptyMap()
         val parser = parsers[profileDef.output.schema]
         if (parser != null) {
             return try {
-                parser(rawOutput).copy(rawOutputPath = resolvedOutputPath)
+                val parsed = parser(rawOutput).copy(rawOutputPath = resolvedOutputPath)
+                if (unknownWarning.isNotEmpty()) parsed.copy(metadata = parsed.metadata + unknownWarning) else parsed
             } catch (e: Exception) {
                 failedResult(testPlan, "Parse error: ${e.message}",
-                    metadata = mapOf("exitCode" to exitCode, "stdout" to stdout.take(500)))
+                    metadata = mapOf("exitCode" to exitCode, "stdout" to stdout.take(500)) + unknownWarning)
             }
         }
 
@@ -179,7 +178,7 @@ class CatalogAdapter(
             status = "completed",
             summary = null,
             rawOutputPath = resolvedOutputPath,
-            metadata = mapOf("exitCode" to exitCode, "stdout" to stdout.take(500))
+            metadata = mapOf("exitCode" to exitCode, "stdout" to stdout.take(500)) + unknownWarning
         )
     }
 
