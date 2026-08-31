@@ -92,4 +92,14 @@ class GatlingParserTest {
         assertEquals(true, result.metadata["gatling"])
         assertEquals(1500L, result.metadata["total_requests"])
     }
+
+    @Test
+    fun `p90 is approximated from p75 and p75 exposed in metadata`() {
+        val json = File("src/test/fixtures/gatling-sample-output.json").readText()
+        val result = GatlingParser.parse(json)
+        // p90 is actually Gatling's 75th percentile (closest available)
+        assertEquals(60.0, result.summary!!.latency.p90Ms, 0.001)
+        assertEquals(60.0, result.metadata["p75Ms"] as Double, 0.001)
+        assertTrue(result.metadata.containsKey("p90IsP75Approximation"))
+    }
 }

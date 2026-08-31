@@ -79,6 +79,10 @@ object GatlingParser {
         metadata["ok_requests"] = okReq
         metadata["ko_requests"] = koReq
         metadata["throughput"] = throughput
+        // Gatling p90 is actually 75th percentile (closest available) — expose p75 and flag approximation
+        val p75raw = stats.getAsJsonObject("percentiles2")?.let { parseDouble(it.get("total")) } ?: 0.0
+        metadata["p75Ms"] = p75raw
+        metadata["p90IsP75Approximation"] = true
         if (stats.has("group1")) metadata["group1"] = stats.getAsJsonObject("group1").toString()
 
         return RunResult(
