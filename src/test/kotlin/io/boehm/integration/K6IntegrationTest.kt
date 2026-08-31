@@ -89,7 +89,7 @@ class K6IntegrationTest {
         assertEquals("completed", result.status, "should complete, error: ${result.metadata["error"]}, stdout: ${result.metadata["stdout"]}")
         assertNotNull(result.summary, "summary should not be null, error: ${result.metadata["error"]}")
         assertTrue(result.summary!!.totalRequests > 0, "should have requests")
-        // Fixture contains 1 failure in 25 (4%) to test error handling; allow <=5%
+        // Live httpbingo.org/get returns 200; allow <=5% for flake (fixture has 4% intentionally)
         assertTrue(result.summary!!.errorRatePct <= 5.0, "error rate should be <=5%, got ${result.summary!!.errorRatePct}")
         assertTrue(result.summary!!.latency.p50Ms > 0, "p50 should be positive")
 

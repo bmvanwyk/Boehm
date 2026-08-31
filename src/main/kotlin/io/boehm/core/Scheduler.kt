@@ -37,6 +37,11 @@ class Scheduler(
     fun stop() {
         running = false
         executor.shutdown()
+        try {
+            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) executor.shutdownNow()
+        } catch (_: InterruptedException) {
+            executor.shutdownNow()
+        }
     }
 
     /**

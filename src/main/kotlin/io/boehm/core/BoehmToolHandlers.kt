@@ -46,7 +46,13 @@ class BoehmToolHandlers(
 
         val parameters = planJson.entrySet()
             .filterNot { knownPlanFields.contains(it.key) }
-            .associate { it.key to (it.value?.toString() ?: "") }
+            .associate {
+                it.key to when {
+                    it.value.isJsonPrimitive -> it.value.asJsonPrimitive.let { p -> if (p.isString) p.asString else p.toString() }
+                    it.value.isJsonNull -> ""
+                    else -> it.value.toString()
+                }
+            }
 
         val plan = TestPlan(
             type = planJson.optString("type") ?: "http",

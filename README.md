@@ -203,7 +203,7 @@ Add a new top-level entry under `tools:` with `run.command` and at least one pro
 
 ## Quality and docs
 
-- Coverage: minimum 80% instructions (excludes `MainKt`). Run `./gradlew test jacocoTestReport` and check `build/reports/jacoco/test/html/`.
+- Coverage: minimum 80% instructions (excludes `MainKt`). Run `./gradlew test jacocoTestReport` and check `build/reports/jacoco/test/html/`. Integration tests that skip (no binary/Docker image) are not counted as passed.
 - Architecture details, state model, scheduler, and adapter contract: `docs/architecture.md`.
 - Catalog and profile conventions: `catalog.yaml` and `profiles/<tool>/`.
 - Agent guide: `AGENTS.md`.

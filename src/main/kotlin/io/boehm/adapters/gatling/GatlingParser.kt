@@ -145,7 +145,11 @@ object GatlingParser {
     }
 
     private fun parseLong(elem: com.google.gson.JsonElement?): Long? {
-        val d = parseDouble(elem) ?: return null
-        return d.toLong()
+        if (elem == null || elem.isJsonNull) return null
+        return if (elem.isJsonPrimitive) {
+            elem.asJsonPrimitive.let { p ->
+                if (p.isNumber) p.asLong else p.asString.trim().let { if (it == "-" || it.isEmpty()) null else it.toLongOrNull() }
+            }
+        } else null
     }
 }
