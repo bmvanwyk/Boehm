@@ -36,7 +36,9 @@ class CatalogLoader(private val catalogPath: String) {
         val profiles = profilesRaw.map { (pName, pDef) ->
             pName to parseProfileDef(pName, pDef as Map<String, Any>)
         }.toMap()
-        return ToolDef(name, description, install, run, profiles)
+        val types = (raw["types"] as? List<*>)?.mapNotNull { it?.toString() }?.ifEmpty { null } ?: listOf("http")
+        val toolVersions = (raw["tool_versions"] as? List<*>)?.mapNotNull { it?.toString() }?.ifEmpty { null } ?: listOf("0.x")
+        return ToolDef(name, description, install, run, profiles, types, toolVersions)
     }
 
     @Suppress("UNCHECKED_CAST")

@@ -10,7 +10,9 @@ data class ToolDef(
     val description: String,
     val install: String?,
     val run: RunDef,
-    val profiles: Map<String, ProfileDef>
+    val profiles: Map<String, ProfileDef>,
+    val types: List<String> = listOf("http"),
+    val toolVersions: List<String> = listOf("0.x")
 )
 
 data class RunDef(

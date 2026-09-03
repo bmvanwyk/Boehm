@@ -35,6 +35,16 @@ import java.util.UUID
  */
 object K6Parser {
 
+    private const val P50 = 50.0
+    private const val P90 = 90.0
+    private const val P95 = 95.0
+    private const val P99 = 99.0
+    private const val MS_PER_SEC = 1000.0
+    private const val MIN_DURATION_SEC = 1
+    private const val HTTP_ERROR_STATUS_THRESHOLD = 400
+
+    // Branchy by design: per-line skips and fallbacks across k6 versions, collected into one summary.
+    @Suppress("CyclomaticComplexMethod", "LongMethod", "LoopWithTooManyJumpStatements")
     fun parse(rawJsonl: String): RunResult {
         val lines = rawJsonl.trim().lines().filter { it.isNotBlank() }
         if (lines.isEmpty()) {
@@ -96,7 +106,7 @@ object K6Parser {
                         sawStatusTag = true
                         responseCodes[status] = responseCodes.getOrDefault(status, 0) + 1
                         val code = status.toIntOrNull()
-                        if (code != null && code >= 400) failedByStatus++
+                        if (code != null && code >= HTTP_ERROR_STATUS_THRESHOLD) failedByStatus++
                     }
                 }
                 "http_reqs" -> {
@@ -130,18 +140,18 @@ object K6Parser {
         val sorted = durationValues.sorted()
         val latency = Latency(
             minMs = sorted.first(),
-            p50Ms = percentile(sorted, 50.0),
-            p90Ms = percentile(sorted, 90.0),
-            p95Ms = percentile(sorted, 95.0),
-            p99Ms = percentile(sorted, 99.0),
+            p50Ms = percentile(sorted, P50),
+            p90Ms = percentile(sorted, P90),
+            p95Ms = percentile(sorted, P95),
+            p99Ms = percentile(sorted, P99),
             maxMs = sorted.last(),
             meanMs = Stats.mean(durationValues),
             stdevMs = Stats.stdev(durationValues)
         )
 
         val durationSec = if (timestamps.size >= 2) {
-            val spanSec = (timestamps.max() - timestamps.min()) / 1000.0
-            spanSec.toInt().coerceAtLeast(1)
+            val spanSec = (timestamps.max() - timestamps.min()) / MS_PER_SEC
+            spanSec.toInt().coerceAtLeast(MIN_DURATION_SEC)
         } else {
             // No usable timestamps: avoid divide-by-zero in throughput.
             1

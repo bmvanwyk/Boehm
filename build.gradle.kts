@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") version "2.4.10"
+    id("dev.detekt") version "2.0.0-alpha.6"
     application
     jacoco
 }
@@ -69,4 +70,17 @@ tasks.jacocoTestReport {
             fileTree(dir) { exclude("io/boehm/MainKt*") }
         })
     )
+}
+
+detekt {
+    // Fail the build on new violations; tuned config lives in config/detekt/.
+    autoCorrect = false
+    buildUponDefaultConfig = true
+    allRules = false
+    config.setFrom("config/detekt/detekt.yml")
+}
+
+// detekt runs as part of ./gradlew build and ./gradlew check.
+tasks.check {
+    dependsOn(tasks.detekt)
 }

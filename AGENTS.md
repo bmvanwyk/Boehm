@@ -10,7 +10,7 @@
 - **Cancellation** (`cancel_run`) — queued runs are flipped to `cancelled`; running runs have their subprocess tree killed
 - **Real progress** (`get_run_progress`) — estimated from `started_at` and the plan's warmup/duration, not hardcoded values
 - **Timeout validation** — plans whose `timeout_sec` cannot cover `duration_sec + warmup_sec + slack` are rejected at submit time
-- **Measurement integrity** — resubmitting a scenario name updates its stored plan; ISO-8601 timestamps everywhere; Store access serialized behind one lock
+- **Measurement integrity** — resubmitting a scenario name updates its stored plan, but each run snapshots the exact plan it executed (`runs.test_plan`); ISO-8601 timestamps everywhere; Store access serialized behind one lock
 
 ## Key Documents
 
@@ -27,7 +27,7 @@ Read `docs/architecture.md` before changing behaviour.
 | Tool | Parser | Profile(s) | Integration Test | Docker |
 |------|--------|------------|------------------|--------|
 | Tulip | `TulipParser` (JSON) | `http-get`, `demo` | `TulipIntegrationTest` | No (bare metal only) |
-| JMeter | `JMeterParser` (JTL CSV) | `http-get` | `JMeterIntegrationTest` | Yes (`justb4/jmeter:5.6.3` fallback) |
+| JMeter | `JMeterParser` (JTL CSV) | `http-get` | `JMeterIntegrationTest` | Yes (`alpine/jmeter:latest` or `justb4/jmeter:5.6.3` fallback) |
 | k6 | `K6Parser` (NDJSON) | `http-get` | `K6IntegrationTest` | Yes (`grafana/k6:latest` fallback) |
 | Gatling | `GatlingParser` (JSON) | `http-get` | `GatlingIntegrationTest` | Yes (`denvazh/gatling:3.9.5` fallback) |
 
@@ -36,7 +36,7 @@ Read `docs/architecture.md` before changing behaviour.
 | Component | Choice |
 |-----------|--------|
 | Language | Kotlin / JVM |
-| Build | Gradle (multi-module) |
+| Build | Gradle (single-module) |
 | MCP SDK | `io.modelcontextprotocol:kotlin-sdk:0.15.0` |
 | Persistence | SQLite (`~/.boehm/boehm.db`) |
 | Testing | JUnit 5 |
@@ -81,13 +81,16 @@ Read `docs/architecture.md` before changing behaviour.
 ## Build and Run
 
 ```bash
-./gradlew build                       # Compile + test
+./gradlew build                       # Compile + test + detekt
 ./gradlew test                        # Run tests
+./gradlew detekt                      # Static analysis only (config/detekt/detekt.yml)
 ./gradlew test jacocoTestReport       # Tests + coverage report (HTML at build/reports/jacoco/)
 ./gradlew run --args="--token=<your-token>"   # Start MCP server
 ```
 
 ## Quality Standards
+
+- **Static analysis: detekt** (`dev.detekt` 2.0.0-alpha.6, matching Kotlin 2.4.10). `./gradlew build` fails on new violations. Tuned norms in `config/detekt/detekt.yml`: 140-col limit, no wildcard imports in `src/main`, early-return style allowed (`ReturnCount` max 6), JDBC indices / test fixtures excluded. Deliberate boundaries (branchy output parsers, catch-all around external processes that must never kill the queue) carry `@Suppress` with a reason comment — prefer that over weakening rules globally.
 
 - **Code coverage: minimum 80%** (instructions). Run `./gradlew test jacocoTestReport` and check the HTML report. Coverage below 80% should be improved before committing.
 - All new adapter profiles must include a parser integration test.

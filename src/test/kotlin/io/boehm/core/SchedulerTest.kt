@@ -232,7 +232,7 @@ class TestAdapter(
         run(testPlan) { /* no process to report in mock */ }
 
     override fun run(testPlan: TestPlan, onProcessStart: (Process) -> Unit): RunResult {
-        if (shouldThrow) throw RuntimeException("boom")
+        if (shouldThrow) throw IllegalStateException("boom")
         Thread.sleep(sleepMs)
         return RunResult(
             tool = "tulip", testName = "test",

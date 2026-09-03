@@ -168,12 +168,12 @@ tools:
 ```
 
 * `CatalogModels.kt` defines `Catalog`/`ToolDef`/`ProfileDef`/`OutputDef`/`OverrideDef`; `CatalogLoader.kt` parses the YAML via SnakeYAML.
-* `CatalogAdapter.kt` is the single `PerfToolAdapter` implementation: JSON/JSONC templates get overrides applied via JSON path (`profile.overrides[].path`, e.g. `actions.user_params.url` for Tulip) with type coercion; script templates (`.js`, `.jmx`, `.scala`) are copied as-is and overrides flow only through `{{var}}` substitution in `run.command` (`CatalogAdapter.kt:339`).
+* `CatalogAdapter.kt` is the single `PerfToolAdapter` implementation: JSON/JSONC templates get overrides applied via JSON path (`profile.overrides[].path`, e.g. `actions.user_params.url` for Tulip) with type coercion; script templates (`.js`, `.jmx`, `.scala`) are copied as-is and overrides flow only through `{{var}}` substitution in `run.command` (`CatalogAdapter.substituteCommand`).
 * `AdapterBuilder.kt` hides profiles whose `output.schema` has no parser — they appear in `catalog.yaml` but never in `list_adapters` (stderr note).
 
 ### Adding a new profile (reusing an existing parser)
 
-1. Create the template, e.g. `profiles/k6/http-post.js` reading `__ENV.TARGET_URL` like `profiles/k6/http-get.js:17`.
+1. Create the template, e.g. `profiles/k6/http-post.js` reading `__ENV.TARGET_URL` like `profiles/k6/http-get.js`.
 2. Add to `catalog.yaml`:
 
 ```yaml
@@ -195,11 +195,11 @@ k6:
 { "tool": "k6", "test_name": "my-post", "test_plan": { "profile": "http-post", "target_url": "https://myhost/api", "rate_per_sec": 50 } }
 ```
 
-Overrides not listed are warned (`CatalogAdapter.kt:212` — unknown overrides produce `validation_errors`); `target_url` is validated as `http`/`https` URI with query strings allowed and shell-metachar screening (`CatalogAdapter.kt:215,222`); numeric overrides must be integers; `timeout_sec` must satisfy `>= duration_sec + warmup_sec + 10` (`CatalogAdapter.kt:62`). Docker fallback is test-only — production `catalog.yaml` remains bare-metal (see `src/test/kotlin/io/boehm/integration/*:14`).
+Overrides not listed are warned (unknown overrides surface as `warnings` in run metadata); `target_url` is validated as `http`/`https` URI with query strings allowed and shell-metachar screening (`CatalogAdapter.sanitizeOverride`); numeric overrides must be integers; `timeout_sec` must satisfy `>= duration_sec [+ warmup_sec for Tulip profiles] + 10` (`CatalogAdapter.validate`). Docker fallback is test-only — production `catalog.yaml` remains bare-metal (see `src/test/kotlin/io/boehm/integration/*IntegrationTest`).
 
 ### Adding a new tool
 
-Add a new top-level entry under `tools:` with `run.command` and at least one profile whose `output.schema` matches an existing parser (to avoid writing a parser) or add a new parser object (`TulipParser.kt`/`K6Parser.kt`/`JMeterParser.kt`/`GatlingParser.kt`) and register it in the `parsers` map in `Main.kt:50`.
+Add a new top-level entry under `tools:` with `run.command` and at least one profile whose `output.schema` matches an existing parser (to avoid writing a parser) or add a new parser object (`TulipParser.kt`/`K6Parser.kt`/`JMeterParser.kt`/`GatlingParser.kt`) and register it in the `parsers` map in `Main`.
 
 ## Quality and docs
 

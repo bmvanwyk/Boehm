@@ -5,13 +5,15 @@ import java.sql.DriverManager
 import java.time.Instant
 import java.util.UUID
 
-data class AdapterRow(val name: String, val supportedTypes: String, val version: String, val toolVersions: String)
+data class AdapterRow(val name: String, val profile: String, val supportedTypes: String, val version: String, val toolVersions: String)
 data class ScenarioRow(val id: String, val tool: String, val name: String, val testPlan: String, val createdAt: String)
 data class RunRow(val id: String, val scenarioId: String, val tool: String, val status: String,
                   val createdAt: String, val startedAt: String?, val completedAt: String?,
                   val error: String?, val summary: String?, val rawOutputPath: String?,
-                  val metadata: String?)
+                  val metadata: String?, val testPlan: String?)
 
+// Single persistence facade for all SQLite access (serialized behind one lock).
+@Suppress("TooManyFunctions")
 class Store(private val dbPath: String) {
     private var _conn: Connection? = null
     private val lock = Any()
@@ -20,7 +22,11 @@ class Store(private val dbPath: String) {
             if (_conn == null) {
                 Class.forName("org.sqlite.JDBC")
                 val c = DriverManager.getConnection("jdbc:sqlite:$dbPath")
-                c.createStatement().use { it.execute("PRAGMA journal_mode=WAL") }
+                c.createStatement().use {
+                    it.execute("PRAGMA journal_mode=WAL")
+                    it.execute("PRAGMA foreign_keys=ON")
+                    it.execute("PRAGMA busy_timeout=5000")
+                }
                 initSchema(c)
                 _conn = c
             }
@@ -29,43 +35,58 @@ class Store(private val dbPath: String) {
 
     private fun initSchema(c: Connection) {
         c.createStatement().use { stmt ->
+            createTables(stmt)
+            migrateExistingTables(c)
+            ensureSchemaVersionSeeded(c, stmt)
+        }
+    }
+
+    /** Creates all tables; safe to re-run (IF NOT EXISTS). */
+    private fun createTables(stmt: java.sql.Statement) {
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS adapters (
-                    name TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    profile TEXT NOT NULL DEFAULT '',
                     supported_types TEXT NOT NULL,
                     adapter_version TEXT NOT NULL,
-                    tool_versions TEXT NOT NULL
+                    tool_versions TEXT NOT NULL,
+                    PRIMARY KEY (name, profile)
                 )
             """)
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS test_scenarios (
                     id TEXT PRIMARY KEY,
-                    tool TEXT NOT NULL REFERENCES adapters(name),
+                    -- tool is intentionally not a FOREIGN KEY: adapters is keyed by (name, profile)
+                    -- while scenarios track only the tool name.
+                    tool TEXT NOT NULL,
                     name TEXT NOT NULL,
                     test_plan JSON NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
                     UNIQUE(tool, name)
                 )
             """)
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS runs (
                     id TEXT PRIMARY KEY,
-                    scenario_id TEXT NOT NULL REFERENCES test_scenarios(id),
+                    -- scenario_id is intentionally not a FOREIGN KEY: the scheduler
+                    -- handles missing scenarios gracefully (marks run failed).
+                    scenario_id TEXT NOT NULL,
                     tool TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'pending',
-                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
                     started_at TEXT,
                     completed_at TEXT,
                     error TEXT,
                     summary JSON,
                     raw_output_path TEXT,
-                    metadata JSON DEFAULT '{}'
+                    metadata JSON DEFAULT '{}',
+                    test_plan JSON
                 )
             """)
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS schema_version (
                     version INTEGER PRIMARY KEY,
-                    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
                 )
             """)
             stmt.execute("""
@@ -75,16 +96,33 @@ class Store(private val dbPath: String) {
                     tagged_at TEXT NOT NULL
                 )
             """)
-            // Ensure schema_version is at least 1
-            val rs = stmt.executeQuery("SELECT COALESCE(MAX(version),0) as v FROM schema_version")
-            val cur = if (rs.next()) rs.getInt("v") else 0
-            rs.close()
-            if (cur < 1) {
-                c.prepareStatement("INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (1, ?)").use { ps ->
-                    ps.setString(1, Instant.now().toString())
-                    ps.execute()
-                }
+    }
+
+    /** Seeds schema_version on fresh databases. */
+    private fun ensureSchemaVersionSeeded(c: Connection, stmt: java.sql.Statement) {
+        val rs = stmt.executeQuery("SELECT COALESCE(MAX(version),0) as v FROM schema_version")
+        val cur = if (rs.next()) rs.getInt("v") else 0
+        rs.close()
+        if (cur < 1) {
+            c.prepareStatement("INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (1, ?)").use { ps ->
+                ps.setString(1, Instant.now().toString())
+                ps.execute()
             }
+        }
+    }
+
+    /** Adds columns introduced after v1 to pre-existing database files. */
+    private fun migrateExistingTables(c: Connection) {
+        ensureColumn(c, "adapters", "profile", "TEXT NOT NULL DEFAULT ''")
+        ensureColumn(c, "runs", "test_plan", "JSON")
+    }
+
+    private fun ensureColumn(c: Connection, table: String, column: String, ddl: String) {
+        c.createStatement().use { stmt ->
+            stmt.executeQuery("PRAGMA table_info($table)").use { rs ->
+                while (rs.next()) if (rs.getString("name") == column) return
+            }
+            stmt.execute("ALTER TABLE $table ADD COLUMN $column $ddl")
         }
     }
 
@@ -108,13 +146,14 @@ class Store(private val dbPath: String) {
         }
     }
 
-    fun insertAdapter(name: String, supportedTypes: String, version: String, toolVersions: String) {
+    fun insertAdapter(name: String, supportedTypes: String, version: String, toolVersions: String, profile: String = "") {
         synchronized(lock) {
-            conn.prepareStatement("INSERT OR IGNORE INTO adapters VALUES (?, ?, ?, ?)").use { ps ->
+            conn.prepareStatement("INSERT OR IGNORE INTO adapters VALUES (?, ?, ?, ?, ?)").use { ps ->
                 ps.setString(1, name)
-                ps.setString(2, supportedTypes)
-                ps.setString(3, version)
-                ps.setString(4, toolVersions)
+                ps.setString(2, profile)
+                ps.setString(3, supportedTypes)
+                ps.setString(4, version)
+                ps.setString(5, toolVersions)
                 ps.execute()
             }
         }
@@ -123,10 +162,10 @@ class Store(private val dbPath: String) {
     fun listAdapters(): List<AdapterRow> {
         synchronized(lock) {
             conn.createStatement().use { stmt ->
-                stmt.executeQuery("SELECT name, supported_types, adapter_version, tool_versions FROM adapters").use { rs ->
+                stmt.executeQuery("SELECT name, profile, supported_types, adapter_version, tool_versions FROM adapters").use { rs ->
                     val result = mutableListOf<AdapterRow>()
                     while (rs.next()) {
-                        result.add(AdapterRow(rs.getString("name"), rs.getString("supported_types"),
+                        result.add(AdapterRow(rs.getString("name"), rs.getString("profile"), rs.getString("supported_types"),
                             rs.getString("adapter_version"), rs.getString("tool_versions")))
                     }
                     return result
@@ -155,7 +194,9 @@ class Store(private val dbPath: String) {
 
     fun getScenario(tool: String, name: String): ScenarioRow? {
         synchronized(lock) {
-            conn.prepareStatement("SELECT id, tool, name, test_plan, created_at FROM test_scenarios WHERE tool = ? AND name = ?").use { ps ->
+            conn.prepareStatement(
+                "SELECT id, tool, name, test_plan, created_at FROM test_scenarios WHERE tool = ? AND name = ?"
+            ).use { ps ->
                 ps.setString(1, tool)
                 ps.setString(2, name)
                 ps.executeQuery().use { rs ->
@@ -178,14 +219,19 @@ class Store(private val dbPath: String) {
         }
     }
 
-    fun insertRun(scenarioId: String, tool: String): String? {
+    /**
+     * Per-run plan snapshot: the scenario row keeps the latest plan (upsert),
+     * while each run stores the exact plan it executed so history stays reproducible.
+     */
+    fun insertRun(scenarioId: String, tool: String, testPlan: String? = null): String? {
         synchronized(lock) {
             val id = UUID.randomUUID().toString()
-            conn.prepareStatement("INSERT INTO runs (id, scenario_id, tool, created_at) VALUES (?, ?, ?, ?)").use { ps ->
+            conn.prepareStatement("INSERT INTO runs (id, scenario_id, tool, created_at, test_plan) VALUES (?, ?, ?, ?, ?)").use { ps ->
                 ps.setString(1, id)
                 ps.setString(2, scenarioId)
                 ps.setString(3, tool)
                 ps.setString(4, Instant.now().toString())
+                ps.setString(5, testPlan)
                 ps.execute()
             }
             return id
@@ -202,7 +248,7 @@ class Store(private val dbPath: String) {
                         rs.getString("status"), rs.getString("created_at"),
                         rs.getString("started_at"), rs.getString("completed_at"),
                         rs.getString("error"), rs.getString("summary"),
-                        rs.getString("raw_output_path"), rs.getString("metadata")
+                        rs.getString("raw_output_path"), rs.getString("metadata"), rs.getString("test_plan")
                     ) else null
                 }
             }
@@ -217,7 +263,7 @@ class Store(private val dbPath: String) {
             conn.prepareStatement("""
                 UPDATE runs SET status = ?, summary = ?, error = ?, raw_output_path = ?, metadata = ?,
                     started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN ? ELSE started_at END,
-                    completed_at = CASE WHEN ? = 'completed' OR ? = 'failed' THEN ? ELSE completed_at END
+                    completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END
                 WHERE id = ?
             """).use { ps ->
                 ps.setString(1, status)
@@ -226,8 +272,8 @@ class Store(private val dbPath: String) {
                 ps.setString(4, rawOutputPath)
                 ps.setString(5, metadata)
                 ps.setString(6, status); ps.setString(7, now)
-                ps.setString(8, status); ps.setString(9, status); ps.setString(10, now)
-                ps.setString(11, runId)
+                ps.setString(8, status); ps.setString(9, now)
+                ps.setString(10, runId)
                 ps.execute()
             }
         }
@@ -244,7 +290,7 @@ class Store(private val dbPath: String) {
                             rs.getString("status"), rs.getString("created_at"),
                             rs.getString("started_at"), rs.getString("completed_at"),
                             rs.getString("error"), rs.getString("summary"),
-                            rs.getString("raw_output_path"), rs.getString("metadata")))
+                            rs.getString("raw_output_path"), rs.getString("metadata"), rs.getString("test_plan")))
                     }
                     return result
                 }
@@ -264,7 +310,7 @@ class Store(private val dbPath: String) {
                         rs.getString("status"), rs.getString("created_at"),
                         rs.getString("started_at"), rs.getString("completed_at"),
                         rs.getString("error"), rs.getString("summary"),
-                        rs.getString("raw_output_path"), rs.getString("metadata")
+                        rs.getString("raw_output_path"), rs.getString("metadata"), rs.getString("test_plan")
                     ) else null
                 }
             }
@@ -281,7 +327,7 @@ class Store(private val dbPath: String) {
                             rs.getString("status"), rs.getString("created_at"),
                             rs.getString("started_at"), rs.getString("completed_at"),
                             rs.getString("error"), rs.getString("summary"),
-                            rs.getString("raw_output_path"), rs.getString("metadata")))
+                            rs.getString("raw_output_path"), rs.getString("metadata"), rs.getString("test_plan")))
                     }
                     return result
                 }
@@ -347,7 +393,7 @@ class Store(private val dbPath: String) {
                             rs.getString("status"), rs.getString("created_at"),
                             rs.getString("started_at"), rs.getString("completed_at"),
                             rs.getString("error"), rs.getString("summary"),
-                            rs.getString("raw_output_path"), rs.getString("metadata")))
+                            rs.getString("raw_output_path"), rs.getString("metadata"), rs.getString("test_plan")))
                     }
                     return result
                 }

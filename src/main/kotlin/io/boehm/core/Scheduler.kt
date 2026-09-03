@@ -11,9 +11,14 @@ class Scheduler(
     private val store: Store,
     private val adapters: List<PerfToolAdapter>
 ) {
-    private val executor = Executors.newSingleThreadScheduledExecutor { r ->
+    private var executor = newExecutor()
+    private fun newExecutor() = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "boehm-scheduler").also { it.isDaemon = true }
     }
+    companion object {
+        const val POLL_INTERVAL_MS = 500L
+    }
+
     private val gson = Gson()
     private val adapterMap = adapters.associateBy { "${it.name}:${it.profile}" }
     private var running = false
@@ -27,11 +32,12 @@ class Scheduler(
     fun start() {
         if (running) return
         running = true
+        if (executor.isShutdown || executor.isTerminated) executor = newExecutor()
         val interrupted = store.failInterruptedRuns()
         if (interrupted > 0) {
             System.err.println("boehm: marked $interrupted interrupted run(s) as failed")
         }
-        executor.scheduleWithFixedDelay({ pollQueue() }, 0, 500, TimeUnit.MILLISECONDS)
+        executor.scheduleWithFixedDelay({ pollQueue() }, 0, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS)
     }
 
     fun stop() {
@@ -63,6 +69,8 @@ class Scheduler(
         }
     }
 
+    // Catches everything by design: one bad run must be recorded as failed without killing the queue.
+    @Suppress("TooGenericExceptionCaught")
     private fun pollQueue() {
         val pending = store.getPendingOrRunningRun() ?: return
         if (pending.status == "running") return
@@ -75,7 +83,9 @@ class Scheduler(
                 return
             }
 
-            val testPlan = gson.fromJson(scenario.testPlan, TestPlan::class.java)
+            // Prefer the per-run plan snapshot; fall back to the scenario's latest plan for old runs.
+            val planJson = pending.testPlan ?: scenario.testPlan
+            val testPlan = gson.fromJson(planJson, TestPlan::class.java)
             val adapter = adapterMap["${pending.tool}:${testPlan.profile}"]
             if (adapter == null) {
                 store.updateRunStatus(pending.id, "failed",

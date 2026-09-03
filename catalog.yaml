@@ -10,6 +10,10 @@
 # Docker fallback is test-only: integration tests (*IntegrationTest.kt)
 # try bare-metal then docker.io/... via podman; production catalog remains bare-metal.
 #
+# warmup_sec is Tulip-only: k6/JMeter/Gatling profiles ignore it at execution
+# (progress and timeout calculations skip warmup for those tools).
+# Raw outputs under ~/.boehm/outputs/<tool>/ keep the newest 50 files per tool.
+#
 # Consistency of measurement: the same template file is used every run,
 # so test structure never drifts. Only the declared override params vary.
 #
@@ -19,6 +23,8 @@ tools:
   # ── Tulip ────────────────────────────────────────────────────────────
   tulip:
     description: "JVM micro-benchmarking tool by Anomaly"
+    types: ["http"]
+    tool_versions: ["0.x"]
     install: |
       git clone https://github.com/anomalyco/Tulip ~/git/Tulip
       cd ~/git/Tulip && ./gradlew build
@@ -65,6 +71,8 @@ tools:
   # ── k6 ────────────────────────────────────────────────────────────────
   k6:
     description: "Load testing tool by Grafana (JavaScript)"
+    types: ["http"]
+    tool_versions: ["0.x"]
     install: |
       brew install k6
       # Docker (no local install): docker pull docker.io/grafana/k6:latest
@@ -95,10 +103,12 @@ tools:
   # ── JMeter ────────────────────────────────────────────────────────────
   jmeter:
     description: "Apache JMeter (Java, GUI + CLI)"
+    types: ["http"]
+    tool_versions: ["0.x"]
     install: |
       brew install jmeter
       # Docker (no local install): docker pull docker.io/alpine/jmeter:latest
-      # Alternative: docker.io/justb4/jmeter:5.6.3
+      # or docker.io/justb4/jmeter:5.6.3 (integration tests accept either)
     run:
       command: >
         jmeter
@@ -127,6 +137,8 @@ tools:
   # ── Gatling ───────────────────────────────────────────────────────────
   gatling:
     description: "Scala-based load testing by Gatling Corp"
+    types: ["http"]
+    tool_versions: ["0.x"]
     install: |
       # Bare metal: sdk install gatling or brew install gatling
       # Docker (preferred, no local install): docker pull docker.io/denvazh/gatling:3.9.5

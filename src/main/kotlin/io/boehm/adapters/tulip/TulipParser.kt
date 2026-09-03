@@ -12,6 +12,8 @@ import java.util.UUID
 object TulipParser {
     private const val NS_TO_MS = 1_000_000.0
 
+    // Branchy by design: every missing/mistyped field maps to an IllegalArgumentException.
+    @Suppress("CyclomaticComplexMethod", "ThrowsCount")
     fun parse(rawJson: String): RunResult {
         val root = JsonParser.parseString(rawJson).asJsonObject
 

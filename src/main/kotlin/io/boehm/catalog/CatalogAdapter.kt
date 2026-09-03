@@ -5,7 +5,10 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.boehm.adapters.PerfToolAdapter
-import io.boehm.model.*
+import io.boehm.model.RunResult
+import io.boehm.model.TestPlan
+import io.boehm.model.TestType
+import io.boehm.model.ValidationError
 import java.io.File
 import java.nio.file.Files
 import java.time.Instant
@@ -13,6 +16,8 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
+// Single generic adapter driven by catalog.yaml; the function count scales with template/command/output handling.
+@Suppress("TooManyFunctions")
 class CatalogAdapter(
     private val toolDef: ToolDef,
     private val profileName: String,
@@ -25,6 +30,21 @@ class CatalogAdapter(
     companion object {
         // Process timeout must cover the whole test plus teardown slack.
         private const val TIMEOUT_SLACK_SEC = 10
+        // Raw-output retention: keep the newest N files per tool.
+        const val MAX_RETAINED_OUTPUTS = 50
+        // Seconds to wait for a killed process / its captured output to settle.
+        const val PROCESS_SETTLE_SEC = 2L
+        // Chars of captured stdout preserved in run metadata on timeout/parse failure.
+        const val STDOUT_SNIPPET_CHARS = 500
+
+        fun purgeOldOutputs(outputDir: File, keep: Int = MAX_RETAINED_OUTPUTS) {
+            try {
+                val files = outputDir.listFiles { f -> f.isFile }?.sortedBy { it.lastModified() } ?: return
+                if (files.size > keep) files.take(files.size - keep).forEach { it.delete() }
+            } catch (_: Exception) {
+                // Retention is best-effort; never fail a run over cleanup.
+            }
+        }
     }
 
     override val profile: String get() = profileName
@@ -35,9 +55,9 @@ class CatalogAdapter(
 
     override val name: String get() = toolDef.name
     override val supportedTestTypes: List<TestType>
-        get() = listOf(TestType.HTTP)
+        get() = toolDef.types.mapNotNull { label -> TestType.entries.find { it.label == label } }.ifEmpty { listOf(TestType.HTTP) }
     override val toolVersions: List<String>
-        get() = listOf("0.x")
+        get() = toolDef.toolVersions.ifEmpty { listOf("0.x") }
 
     override fun validate(testPlan: TestPlan): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
@@ -55,13 +75,17 @@ class CatalogAdapter(
             errors.add(ValidationError("ratePerSec", "must be > 0"))
         }
         if (profileDef.overrides.containsKey("duration_sec")) {
-            val minTimeout = testPlan.durationSec + testPlan.warmupSec + TIMEOUT_SLACK_SEC
+            // warmup_sec only counts when the profile actually supports it (Tulip-only today).
+            val warmup = if (profileDef.overrides.containsKey("warmup_sec")) testPlan.warmupSec else 0
+            val minTimeout = testPlan.durationSec + warmup + TIMEOUT_SLACK_SEC
             if (testPlan.timeoutSec < minTimeout) {
+                val warmupNote = if (profileDef.overrides.containsKey("warmup_sec")) " + warmup_sec" else ""
                 errors.add(
                     ValidationError(
                         "timeoutSec",
-                        "must be >= duration_sec + warmup_sec + $TIMEOUT_SLACK_SEC " +
-                            "(got ${testPlan.timeoutSec}, need >= $minTimeout); otherwise the run would be killed mid-test"
+                        "must be >= duration_sec$warmupNote + $TIMEOUT_SLACK_SEC " +
+                            "(got ${testPlan.timeoutSec}, need >= $minTimeout);" +
+                            " otherwise the run would be killed mid-test"
                     )
                 )
             }
@@ -73,6 +97,9 @@ class CatalogAdapter(
 
     override fun run(testPlan: TestPlan): RunResult = run(testPlan) { /* no listener */ }
 
+    // Long by design: template rendering, command substitution, subprocess execution, and parsing
+    // form one auditable sequence where splitting would obscure the cleanup paths.
+    @Suppress("LongMethod", "CyclomaticComplexMethod", "TooGenericExceptionCaught")
     override fun run(testPlan: TestPlan, onProcessStart: (java.lang.Process) -> Unit): RunResult {
         val overrides = resolveOverrides(testPlan)
         val unknownOverrides = testPlan.parameters.keys.filter { it !in profileDef.overrides }
@@ -80,6 +107,7 @@ class CatalogAdapter(
         val outputDir = File(System.getProperty("user.home"), ".boehm/outputs/${toolDef.name}")
         outputDir.mkdirs()
         val outputFile = File(outputDir, "${Instant.now().toString().replace(":", "-")}.json")
+        purgeOldOutputs(outputDir)
 
         // Load config template (JSON-based: apply overrides; script-based: copy as-is)
         val configAndOutput =         if (profileDef.config != null) {
@@ -141,14 +169,14 @@ class CatalogAdapter(
         if (!finished) {
             process.descendants().forEach { it.destroyForcibly() }
             process.destroyForcibly()
-            process.waitFor(2, TimeUnit.SECONDS)
-            val partial = try { stdoutFuture.get(2, TimeUnit.SECONDS) } catch (e: Exception) { "" }
+            process.waitFor(PROCESS_SETTLE_SEC, TimeUnit.SECONDS)
+            val partial = try { stdoutFuture.get(PROCESS_SETTLE_SEC, TimeUnit.SECONDS) } catch (_: Exception) { "" }
             configFile?.delete()
             configFile?.parentFile?.delete()
             return failedResult(testPlan, "timeout after ${testPlan.timeoutSec}s",
-                metadata = mapOf("stdout" to partial.take(500)))
+                metadata = mapOf("stdout" to partial.take(STDOUT_SNIPPET_CHARS)))
         }
-        val stdout = try { stdoutFuture.get(2, TimeUnit.SECONDS) } catch (e: Exception) { "" }
+        val stdout = try { stdoutFuture.get(PROCESS_SETTLE_SEC, TimeUnit.SECONDS) } catch (_: Exception) { "" }
         val exitCode = process.exitValue()
 
         configFile?.delete()
@@ -158,7 +186,11 @@ class CatalogAdapter(
         val rawOutput = readOutput(profileDef.output.path, resolvedOutputPath, stdout)
 
         // Parse
-        val unknownWarning = if (unknownOverrides.isNotEmpty()) mapOf("warnings" to unknownOverrides.map { "unknown override $it ignored" }) else emptyMap()
+        val unknownWarning = if (unknownOverrides.isEmpty()) {
+            emptyMap()
+        } else {
+            mapOf("warnings" to unknownOverrides.map { "unknown override $it ignored" })
+        }
         val parser = parsers[profileDef.output.schema]
         if (parser != null) {
             return try {
@@ -166,7 +198,7 @@ class CatalogAdapter(
                 if (unknownWarning.isNotEmpty()) parsed.copy(metadata = parsed.metadata + unknownWarning) else parsed
             } catch (e: Exception) {
                 failedResult(testPlan, "Parse error: ${e.message}",
-                    metadata = mapOf("exitCode" to exitCode, "stdout" to stdout.take(500)) + unknownWarning)
+                    metadata = mapOf("exitCode" to exitCode, "stdout" to stdout.take(STDOUT_SNIPPET_CHARS)) + unknownWarning)
             }
         }
 
@@ -178,7 +210,7 @@ class CatalogAdapter(
             status = "completed",
             summary = null,
             rawOutputPath = resolvedOutputPath,
-            metadata = mapOf("exitCode" to exitCode, "stdout" to stdout.take(500)) + unknownWarning
+            metadata = mapOf("exitCode" to exitCode, "stdout" to stdout.take(STDOUT_SNIPPET_CHARS)) + unknownWarning
         )
     }
 
@@ -212,17 +244,20 @@ class CatalogAdapter(
         return result
     }
 
-    private val SHELL_METACHAR_REGEX = Regex("[;|&`\$(){}<>\\n\\r']")
-    private val URL_SHELL_REGEX = Regex("[;|`\$(){}<>\\n\\r']") // for URLs, allow & and ?=&%# etc., but block '
+    private val shellMetacharRegex = Regex("[;|&`\$(){}<>\\n\\r']")
+    private val urlShellRegex = Regex("[;|`\$(){}<>\\n\\r']") // for URLs, allow & and ?=&%# etc., but block '
 
     /**
      * Reject override values that contain shell metacharacters or otherwise look
      * like command injection. Numeric overrides are parsed as int; target_url is
      * validated as http/https URI (query strings allowed, whitespace still rejected).
      */
+    // Every invalid value becomes an IllegalArgumentException by contract; callers surface them as validation errors.
+    // The generic catch wraps the URI parser, which throws several unrelated exception types.
+    @Suppress("ThrowsCount", "TooGenericExceptionCaught")
     private fun sanitizeOverride(name: String, value: String) {
         if (value.isEmpty()) return
-        val shellRegex = if (name == "target_url") URL_SHELL_REGEX else SHELL_METACHAR_REGEX
+        val shellRegex = if (name == "target_url") urlShellRegex else shellMetacharRegex
         if (shellRegex.containsMatchIn(value)) {
             throw IllegalArgumentException(
                 "Invalid override '$name': value contains shell metacharacters: '$value'")
@@ -241,10 +276,11 @@ class CatalogAdapter(
                         requireNotNull(uri.host) { "host required" }
                     } else {
                         // Bare host for JMeter — allow host:port
-                        require(value.matches(Regex("^[a-zA-Z0-9._\\-]+(:\\d+)?$"))) { "host must be alphanumeric, dot, hyphen, underscore, optional :port" }
+                        val bareHostPattern = Regex("^[a-zA-Z0-9._\\-]+(:\\d+)?$")
+                        require(value.matches(bareHostPattern)) { "host must be alphanumeric plus dot/hyphen/underscore, optional :port" }
                     }
                 } catch (e: Exception) {
-                    throw IllegalArgumentException("Invalid override 'target_url': ${e.message} in '$value'")
+                    throw IllegalArgumentException("Invalid override 'target_url': ${e.message} in '$value'", e)
                 }
             }
             "rate_per_sec", "duration_sec", "warmup_sec", "timeout_sec", "threads", "connections" -> {
@@ -259,8 +295,7 @@ class CatalogAdapter(
     private fun applyJsonOverrides(templateJson: String, profile: ProfileDef, overrides: Map<String, String>): String {
         val root = JsonParser.parseString(templateJson).asJsonObject
         for ((name, value) in overrides) {
-            val overrideDef = profile.overrides[name] ?: continue
-            val path = overrideDef.path ?: continue
+            val path = profile.overrides[name]?.path ?: continue
             setJsonPath(root, path, value)
         }
         return GsonBuilder().setPrettyPrinting().create().toJson(root)
@@ -299,6 +334,7 @@ class CatalogAdapter(
         }
     }
 
+    @Suppress("LoopWithTooManyJumpStatements")
     private fun stripJsoncComments(jsonc: String): String {
         val sb = StringBuilder()
         var i = 0

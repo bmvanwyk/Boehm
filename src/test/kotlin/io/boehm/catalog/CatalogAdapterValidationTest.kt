@@ -60,7 +60,7 @@ class CatalogAdapterValidationTest {
                 assertTrue(false, "query-string URL should be accepted, got: ${e.message}")
             }
             // other IllegalArgumentException (e.g., numeric) is not relevant
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // parse errors etc. are expected for echo command, ignore
         }
         // Also validate should be clean

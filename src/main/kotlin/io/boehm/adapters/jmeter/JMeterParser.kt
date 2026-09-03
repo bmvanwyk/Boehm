@@ -25,6 +25,15 @@ import java.util.UUID
  */
 object JMeterParser {
 
+    private const val P50 = 50.0
+    private const val P90 = 90.0
+    private const val P95 = 95.0
+    private const val P99 = 99.0
+    private const val MS_PER_SEC = 1000.0
+    private const val MIN_DURATION_SEC = 1.0
+
+    // Branchy by design: header/row validation plus per-row fallbacks, all surfacing as IllegalArgumentException.
+    @Suppress("CyclomaticComplexMethod", "LongMethod", "ThrowsCount")
     fun parse(rawCsv: String): RunResult {
         val lines = rawCsv.trim().lines().filter { it.isNotBlank() }
         if (lines.size < 2) {
@@ -122,10 +131,10 @@ object JMeterParser {
         if (timestamps.size >= 2) {
             val minTs = timestamps.min()
             val maxTs = timestamps.max()
-            return ((maxTs - minTs) / 1000.0).coerceAtLeast(1.0).toInt()
+            return ((maxTs - minTs) / MS_PER_SEC).coerceAtLeast(MIN_DURATION_SEC).toInt()
         }
         // Fallback: sum of elapsed times (less accurate but better than 0)
-        return (elapsedValues.sum() / 1000.0).coerceAtLeast(1.0).toInt()
+        return (elapsedValues.sum() / MS_PER_SEC).coerceAtLeast(MIN_DURATION_SEC).toInt()
     }
 
     private fun computeLatency(elapsed: List<Double>): Latency {
@@ -137,10 +146,10 @@ object JMeterParser {
 
         return Latency(
             minMs = sorted.first(),
-            p50Ms = percentile(sorted, 50.0),
-            p90Ms = percentile(sorted, 90.0),
-            p95Ms = percentile(sorted, 95.0),
-            p99Ms = percentile(sorted, 99.0),
+            p50Ms = percentile(sorted, P50),
+            p90Ms = percentile(sorted, P90),
+            p95Ms = percentile(sorted, P95),
+            p99Ms = percentile(sorted, P99),
             maxMs = sorted.last(),
             meanMs = Stats.mean(elapsed),
             stdevMs = Stats.stdev(elapsed)

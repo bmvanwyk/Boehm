@@ -34,9 +34,9 @@ graph TB
 1. **MCP server is the entrypoint, not the execution engine.** `run_test` validates, persists a `queued` run, and returns immediately. A background scheduler serially executes runs so the stdio loop never blocks.
 2. **SQLite is the source of truth.** Runs, queue state, baselines, and errors are persisted. In-memory state is a cache. The DB path is configurable via `BOEHM_DB_PATH` (`~/.boehm/boehm.db` default, `BOEHM_CATALOG_PATH` for the catalog).
 3. **Adapter boundary is narrow.** `PerfToolAdapter` exposes `validate` and `run` (with an optional `onProcessStart` callback for cancellation). All tool-specific work (template rendering, command substitution, parsing) lives behind that interface.
-4. **Catalog-driven.** Every tool and profile is declared in `catalog.yaml`. No hardcoded adapters. `AdapterBuilder` registers only profiles whose `output.schema` has a parser (`tulip-results`, `jmeter-csv`, `k6-jsonl`, `gatling-stats`). Production `catalog.yaml` is bare-metal; Docker fallback is test-only via `isDockerImagePresent()` in `JMeterIntegrationTest.kt:14` etc.
+4. **Catalog-driven.** Every tool and profile is declared in `catalog.yaml`. No hardcoded adapters. `AdapterBuilder` registers only profiles whose `output.schema` has a parser (`tulip-results`, `jmeter-csv`, `k6-jsonl`, `gatling-stats`). Tool display metadata (`types`, `tool_versions`) is also catalog-driven with `http` / `0.x` defaults. Production `catalog.yaml` is bare-metal; Docker fallback is test-only via `isDockerImagePresent()` in the JMeter/K6/Gatling integration tests.
 5. **Local-first and serial.** One run at a time prevents measurement noise. No cloud dependencies. All `Store` access is serialized behind a single lock (shared SQLite `Connection` is not thread-safe).
-6. **Measurement integrity.** Resubmitting a scenario name upserts its stored plan; timestamps are ISO-8601 (`Instant.now().toString()`) everywhere so lexicographic ordering is correct; timeout is validated before queuing.
+6. **Measurement integrity.** Resubmitting a scenario name upserts its stored plan; each run additionally snapshots the exact plan it executed (`runs.test_plan`) so history stays reproducible; timestamps are ISO-8601 (`Instant.now().toString()`) written explicitly by application code (DB defaults use ISO `strftime` as fallback only); timeout is validated before queuing (`duration_sec [+ warmup_sec for Tulip-only profiles] + 10` slack).
 
 ## Component Architecture
 
@@ -164,7 +164,7 @@ sequenceDiagram
     McpServer-->>Agent: CallToolResult
 ```
 
-Progress (`progressPct`, `currentStage`, `elapsedSec`, `estimatedRemainingSec`) is computed at query time from `started_at` and the scenario's stored `TestPlan` (`warmupSec` + `durationSec`), not from a stored snapshot. `completed` returns `100.0` / `completed`; non-running returns `0.0`.
+Progress (`progressPct`, `currentStage`, `elapsedSec`, `estimatedRemainingSec`) is computed at query time from `started_at` and the run's own plan snapshot (`runs.test_plan`, falling back to the scenario plan for old runs). `warmup_sec` applies to Tulip profiles only `completed` returns `100.0` / `completed`; non-running returns `0.0`.
 
 ### History, baselines, comparison, cancellation
 
@@ -208,7 +208,7 @@ sequenceDiagram
     end
 ```
 
-`compare_runs` is direction-aware: higher `throughputReqPerSec` is an improvement, lower `errorRatePct` and latency (`p50/p90/p95/p99/mean/max`) is an improvement. Deltas with `|deltaPct| > 10%` are flagged as `regression` or `improvement`; zero baselines yield `deltaPct: null` and `unchanged`. Metrics beyond threshold are listed in `regressions` / `improvements`.
+`compare_runs` is direction-aware: higher `throughputReqPerSec` is an improvement, lower `errorRatePct` and latency (`p50/p90/p95/p99/mean/max`) is an improvement. Deltas with `|deltaPct| > 10%` are flagged as `regression` or `improvement`; zero baselines yield `deltaPct: null` and `unchanged`. Gatling runs exclude `p90Ms` from verdicts (`p90ExcludedForGatling: true`) because Gatling only reports the 75th percentile as a `p90` approximation. Metrics beyond threshold are listed in `regressions` / `improvements`.
 
 ## State Model
 
@@ -222,10 +222,10 @@ Persisted per run in `runs`:
 
 - `id` (UUID), `scenario_id` (FK → `test_scenarios`), `tool`
 - `status` (`pending` default, then `queued`, `running`, `completed`, `failed`, `cancelled`)
-- `created_at`, `started_at`, `completed_at` — ISO-8601 (`Instant.now().toString()`), written explicitly by application code (DB defaults are fallback only)
+- `created_at`, `started_at`, `completed_at` — ISO-8601 (`Instant.now().toString()`), written explicitly by application code (DB defaults are ISO `strftime` fallback only); `completed_at` is set for `completed`, `failed`, and `cancelled`
 - `summary` (JSON `Summary`), `error` (string), `raw_output_path`, `metadata` (JSON)
 
-`test_scenarios`: `(tool, name)` unique; `test_plan` is UPSERTed on resubmit so re-queuing a scenario name updates its plan. `baselines`: `scenario_id` PK → `run_id`, `tagged_at`.
+`test_scenarios`: `(tool, name)` unique; `test_plan` is UPSERTed on resubmit so re-queuing a scenario name updates its plan, while each row in `runs` snapshots the plan it executed (`runs.test_plan`). `baselines`: `scenario_id` PK → `run_id`, `tagged_at`. `adapters` is keyed by `(name, profile)` so multi-profile tools are visible in `list_adapters`.
 
 ## Scheduler and Execution Model
 
@@ -276,7 +276,7 @@ Parsers normalize tool-specific output into `RunResult` / `Summary` / `Latency`:
 
 ```sql
 CREATE TABLE adapters (
-    name TEXT PRIMARY KEY,
+    profile TEXT NOT NULL DEFAULT '',
     supported_types TEXT NOT NULL,
     adapter_version TEXT NOT NULL,
     tool_versions TEXT NOT NULL
@@ -286,7 +286,7 @@ CREATE TABLE test_scenarios (
     tool TEXT NOT NULL REFERENCES adapters(name),
     name TEXT NOT NULL,
     test_plan JSON NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     UNIQUE(tool, name)
 );
 CREATE TABLE runs (
@@ -300,7 +300,8 @@ CREATE TABLE runs (
     error TEXT,
     summary JSON,
     raw_output_path TEXT,
-    metadata JSON DEFAULT '{}'
+    metadata JSON DEFAULT '{}',
+    test_plan JSON
 );
 CREATE TABLE baselines (
     scenario_id TEXT PRIMARY KEY REFERENCES test_scenarios(id),
@@ -318,7 +319,7 @@ All public `Store` methods are `synchronized(lock)` (single shared JDBC `Connect
 ## Authentication and Security
 
 - Token required at startup: `--token=<token>` or `BOEHM_TOKEN`. Server refuses to start without it (`exit 1`). Transport trust is delegated to the spawner (stdio).
-- No per-request auth in Phase 1. Raw outputs are written to `~/.boehm/outputs/<tool>/` with default umask; DB at `BOEHM_DB_PATH`.
+- No per-request auth in Phase 1. Raw outputs are written to `~/.boehm/outputs/<tool>/` with default umask (newest 50 files per tool retained, best-effort purge after each run); DB at `BOEHM_DB_PATH`. SQLite opens with `foreign_keys=ON` and `busy_timeout=5000`.
 
 ## Error Handling
 

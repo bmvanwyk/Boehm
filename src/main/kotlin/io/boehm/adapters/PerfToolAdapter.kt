@@ -1,6 +1,9 @@
 package io.boehm.adapters
 
-import io.boehm.model.*
+import io.boehm.model.RunResult
+import io.boehm.model.TestPlan
+import io.boehm.model.TestType
+import io.boehm.model.ValidationError
 import java.lang.Process
 
 interface PerfToolAdapter {

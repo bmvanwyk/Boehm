@@ -28,7 +28,7 @@ class Orchestrator(private val store: Store) {
         adapters["${adapter.name}:${adapter.profile}"] = adapter
         store.insertAdapter(adapter.name,
             gson.toJson(adapter.supportedTestTypes.map { it.label }),
-            adapter.version, gson.toJson(adapter.toolVersions))
+            adapter.version, gson.toJson(adapter.toolVersions), adapter.profile)
     }
 
     fun submitRun(tool: String, testName: String, testPlan: TestPlan): SubmitResult {
@@ -44,7 +44,7 @@ class Orchestrator(private val store: Store) {
         val planJson = gson.toJson(testPlan)
         val scenarioId = store.insertScenario(tool, testName, planJson)
             ?: return SubmitResult.Invalid(listOf(ValidationError("testName", "could not persist scenario")))
-        val runId = store.insertRun(scenarioId, tool)
+        val runId = store.insertRun(scenarioId, tool, planJson)
             ?: return SubmitResult.Invalid(listOf(ValidationError("run", "could not persist run")))
         store.updateRunStatus(runId, "queued")
 

@@ -28,6 +28,9 @@ import kotlinx.serialization.json.putJsonObject
 import java.io.File
 import kotlin.system.exitProcess
 
+private fun gsonForTypes(values: List<*>): String =
+    values.joinToString(prefix = "[", postfix = "]", transform = { "\"$it\"" })
+
 fun main(args: Array<String>) {
     val baseDir = System.getProperty("user.dir")
     val catalogPath = System.getenv("BOEHM_CATALOG_PATH") ?: "$baseDir/catalog.yaml"
@@ -61,8 +64,8 @@ fun main(args: Array<String>) {
 
     // Pre-register adapters in store so list_adapters works immediately
     adapters.forEach { adapter ->
-        val typesJson = """["http"]"""
-        store.insertAdapter(adapter.name, typesJson, adapter.version, """["0.x"]""")
+        val typesJson = gsonForTypes(adapter.supportedTestTypes.map { it.label })
+        store.insertAdapter(adapter.name, typesJson, adapter.version, gsonForTypes(adapter.toolVersions), adapter.profile)
     }
 
     val orchestrator = Orchestrator(store)
@@ -89,6 +92,8 @@ fun main(args: Array<String>) {
  * Build the MCP [Server] and register Boehm's five tools. Kept separate from
  * [main] so tests can construct a server (or just the handlers) without stdio.
  */
+// Declarative per-tool registration; one block per MCP tool by design.
+@Suppress("LongMethod")
 fun buildServer(handlers: BoehmToolHandlers): Server {
     val server = Server(
         serverInfo = Implementation(name = "boehm", version = BoehmToolHandlers.SERVER_VERSION),
@@ -174,7 +179,8 @@ fun buildServer(handlers: BoehmToolHandlers): Server {
 
     server.addTool(
         name = "compare_runs",
-        description = "Compare a run against the scenario's tagged baseline (or an explicit baseline_run_id). Reports per-metric deltas with regression/improvement flags",
+        description = "Compare a run against the scenario's tagged baseline (or an explicit baseline_run_id). " +
+            "Reports per-metric deltas with regression/improvement flags",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
                 putJsonObject("run_id") { put("type", "string") }

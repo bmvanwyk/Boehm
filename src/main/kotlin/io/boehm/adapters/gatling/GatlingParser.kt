@@ -33,12 +33,15 @@ import java.util.UUID
  */
 object GatlingParser {
 
+    // Branchy by design: every malformed global_stats.json shape maps to an IllegalArgumentException.
+    // The generic catch wraps Gson, which throws several unrelated exception types on bad input.
+    @Suppress("CyclomaticComplexMethod", "ThrowsCount", "TooGenericExceptionCaught")
     fun parse(rawJson: String): RunResult {
         if (rawJson.isBlank()) throw IllegalArgumentException("Gatling JSON input is empty")
         val root = try {
             JsonParser.parseString(rawJson).asJsonObject
         } catch (e: Exception) {
-            throw IllegalArgumentException("Invalid JSON: ${e.message}")
+            throw IllegalArgumentException("Invalid JSON: ${e.message}", e)
         }
 
         // Gatling sometimes nests stats under "stats" key (stats.js) vs flat global_stats.json
@@ -144,6 +147,7 @@ object GatlingParser {
         } catch (_: Exception) { null }
     }
 
+    @Suppress("NestedBlockDepth")
     private fun parseLong(elem: com.google.gson.JsonElement?): Long? {
         if (elem == null || elem.isJsonNull) return null
         return if (elem.isJsonPrimitive) {
