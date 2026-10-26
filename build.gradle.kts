@@ -1,12 +1,12 @@
 plugins {
-    kotlin("jvm") version "2.4.10"
+    kotlin("jvm") version "2.4.21"
     id("dev.detekt") version "2.0.0-alpha.6"
     application
     jacoco
 }
 
 jacoco {
-    toolVersion = "0.8.14"
+    toolVersion = "0.8.16"
 }
 
 group = "io.boehm"
@@ -17,18 +17,18 @@ repositories {
 }
 
 dependencies {
-    implementation("com.google.code.gson:gson:2.10.1")
-    implementation("org.xerial:sqlite-jdbc:3.45.1.0")
-    implementation("org.yaml:snakeyaml:2.2")
+    implementation("com.google.code.gson:gson:2.15.0")
+    implementation("org.xerial:sqlite-jdbc:3.53.4.0")
+    implementation("org.yaml:snakeyaml:2.7")
 
     // MCP SDK (official Kotlin MCP server)
     implementation("io.modelcontextprotocol:kotlin-sdk:0.15.0")
-    implementation("io.ktor:ktor-client-cio:3.5.2")
+    implementation("io.ktor:ktor-client-cio:3.6.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-io-core:0.9.1")
 
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.14.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
