@@ -90,7 +90,7 @@ Read `docs/architecture.md` before changing behaviour.
 
 ## Quality Standards
 
-- **Static analysis: detekt** (`dev.detekt` 2.0.0-alpha.6, matching Kotlin 2.4.10). `./gradlew build` fails on new violations. Tuned norms in `config/detekt/detekt.yml`: 140-col limit, no wildcard imports in `src/main`, early-return style allowed (`ReturnCount` max 6), JDBC indices / test fixtures excluded. Deliberate boundaries (branchy output parsers, catch-all around external processes that must never kill the queue) carry `@Suppress` with a reason comment — prefer that over weakening rules globally.
+- **Static analysis: detekt** (`dev.detekt` 2.0.0-alpha.6, matching Kotlin 2.4.21). `./gradlew build` fails on new violations. Tuned norms in `config/detekt/detekt.yml`: 140-col limit, no wildcard imports in `src/main`, early-return style allowed (`ReturnCount` max 6), JDBC indices / test fixtures excluded. Deliberate boundaries (branchy output parsers, catch-all around external processes that must never kill the queue) carry `@Suppress` with a reason comment — prefer that over weakening rules globally.
 
 - **Code coverage: minimum 80%** (instructions). Run `./gradlew test jacocoTestReport` and check the HTML report. Coverage below 80% should be improved before committing.
 - All new adapter profiles must include a parser integration test.
